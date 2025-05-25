@@ -1,0 +1,13 @@
+{
+    "files.associations": {
+        "*.tf": "terraform",
+        "*.rs": "rust",
+        "*.v": "vernacular",
+        "nexus_client.h": "c",
+        "certificate_authority.h": "c",
+        "getopt.h": "c",
+        "nexus_node.h": "c",
+        "network_context.h": "c",
+        "string.h": "c"
+    }
+}
