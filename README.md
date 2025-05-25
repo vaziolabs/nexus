@@ -187,100 +187,6 @@ sudo journalctl -u nexus -f
 ls -la ~/.config/nexus/
 ```
 
-#### Debug Mode
-
-Run the daemon with verbose logging:
-```bash
-NEXUS_DEBUG=1 ./build/nexus --profile home
-```
-
-#### Verify Connections
-
-```bash
-# Check if service is running
-./build/nexus_cli status
-
-# Test DNS resolution
-./build/nexus_cli lookup test.example
-```
-
-## Architecture Components
-1. **NEXUS Client**: Sends/receives DNS requests over QUIC, operates in dual client/server mode to enable decentralized communications across multiple NEXUS servers.
-
-2. **NEXUS Server**: Dedicated server that handles requests from multiple NEXUS clients.
-
-3. **NEXUS Resolver**: Queries other resolvers within the hypermesh network to resolve DNS requests.
-
-These components can run on the same machine or be distributed across different systems.
-
-## Operation Modes
-- **Private Mode**: Acts as both client and server on the same node. Enables registration of private domains for internal use within a private hypermesh network. Each node operates as its own host and mirror for redundancy.
-
-- **Public Mode**: Connects to established NEXUS network (e.g., dns.hypermesh.online) to access globally registered domains. Acts primarily as a client to query TLDs from the network.
-
-- **Federated Mode**: Operates as both client and server, but connects to other NEXUS nodes to form a federated network. Can register domains and serve as a mirror for other nodes.
-
-### Multi-Network Support
-
-NEXUS supports simultaneous operation across multiple networks with different scopes and security boundaries:
-
-- **Network Isolation**: Run multiple network instances simultaneously with strict isolation between them
-- **Independent Contexts**: Maintain separate configuration, credentials, and state for each network
-- **Scope-Based Routing**: Route requests to the appropriate network based on domain scope and request type
-- **Cross-Network Policy**: Define explicit policies for how/if information can flow between networks
-- **Network Profiles**: Save and switch between different network configurations easily
-
-Example Multi-Network Configuration:
-- A private home network for personal devices with local-only TLDs
-- A federated work network with access to company resources and controlled sharing
-- A public hypermesh connection for accessing the broader community
-- Ephemeral P2P connections for direct device-to-device communication without exposing other networks
-
-Each network operates with its own independent:
-- Certificate authorities and trust chains
-- Peer lists and connection policies
-- DNS records and resolution paths
-- Resource access controls
-- Performance and security settings
-
-Networks can be activated, deactivated, or reconfigured independently without affecting other connections.
-
-## Advanced Configuration
-
-### Certificate Management
-
-NEXUS uses Falcon quantum-resistant certificates for authentication. Custom certificates can be specified in profile configurations:
-
-```bash
-./build/nexus_cli edit-profile home ca_cert_path /path/to/ca.cert
-./build/nexus_cli edit-profile home cert_path /path/to/node.cert
-./build/nexus_cli edit-profile home private_key_path /path/to/private.key
-```
-
-### Network Tuning
-
-Optimize network performance:
-
-```bash
-# Adjust connection parameters
-./build/nexus_cli edit-profile home max_tunnels 20
-
-# Enable NAT traversal for complex networks
-./build/nexus_cli edit-profile home enable_nat_traversal true
-```
-
-### Multiple Instances
-
-Run multiple NEXUS instances with different configurations:
-
-```bash
-# Start first instance on default ports
-./build/nexus --profile home
-
-# Start second instance with custom ports in a different terminal
-./build/nexus --profile public --server-port 20053 --client-port 20443
-```
-
 ## Implementation Status
 
 ### Completed Components
@@ -320,6 +226,7 @@ Run multiple NEXUS instances with different configurations:
   - [ ] Resolve server initialization failures
   - [ ] Replace stub implementations with full functionality
   - [ ] Add comprehensive error handling and recovery
+  - [ ] Incorporate Falcon encryption for all QUIC certificates/communications
 - [ ] **Core Functionality**:
   - [ ] Complete DNS resolution functionality with full recursive and iterative resolution
   - [ ] Implement robust TLD mirroring for federated networks with automatic sync
@@ -551,3 +458,197 @@ After verifying basic functionality, consider testing:
 ```bash
 make clean && make
 ```
+
+
+#### Debug Mode
+
+Run the daemon with verbose logging:
+```bash
+NEXUS_DEBUG=1 ./build/nexus --profile home
+```
+
+#### Verify Connections
+
+```bash
+# Check if service is running
+./build/nexus_cli status
+
+# Test DNS resolution
+./build/nexus_cli lookup test.example
+```
+
+## Architecture Components
+1. **NEXUS Client**: Sends/receives DNS requests over QUIC, operates in dual client/server mode to enable decentralized communications across multiple NEXUS servers.
+
+2. **NEXUS Server**: Dedicated server that handles requests from multiple NEXUS clients.
+
+3. **NEXUS Resolver**: Queries other resolvers within the hypermesh network to resolve DNS requests.
+
+These components can run on the same machine or be distributed across different systems.
+
+## Operation Modes
+- **Private Mode**: Acts as both client and server on the same node. Enables registration of private domains for internal use within a private hypermesh network. Each node operates as its own host and mirror for redundancy.
+
+- **Public Mode**: Connects to established NEXUS network (e.g., dns.hypermesh.online) to access globally registered domains. Acts primarily as a client to query TLDs from the network.
+
+- **Federated Mode**: Operates as both client and server, but connects to other NEXUS nodes to form a federated network. Can register domains and serve as a mirror for other nodes.
+
+### Multi-Network Support
+
+NEXUS supports simultaneous operation across multiple networks with different scopes and security boundaries:
+
+- **Network Isolation**: Run multiple network instances simultaneously with strict isolation between them
+- **Independent Contexts**: Maintain separate configuration, credentials, and state for each network
+- **Scope-Based Routing**: Route requests to the appropriate network based on domain scope and request type
+- **Cross-Network Policy**: Define explicit policies for how/if information can flow between networks
+- **Network Profiles**: Save and switch between different network configurations easily
+
+Example Multi-Network Configuration:
+- A private home network for personal devices with local-only TLDs
+- A federated work network with access to company resources and controlled sharing
+- A public hypermesh connection for accessing the broader community
+- Ephemeral P2P connections for direct device-to-device communication without exposing other networks
+
+Each network operates with its own independent:
+- Certificate authorities and trust chains
+- Peer lists and connection policies
+- DNS records and resolution paths
+- Resource access controls
+- Performance and security settings
+
+Networks can be activated, deactivated, or reconfigured independently without affecting other connections.
+
+## Advanced Configuration
+
+### Certificate Management
+
+NEXUS uses Falcon quantum-resistant certificates for authentication. Custom certificates can be specified in profile configurations:
+
+```bash
+./build/nexus_cli edit-profile home ca_cert_path /path/to/ca.cert
+./build/nexus_cli edit-profile home cert_path /path/to/node.cert
+./build/nexus_cli edit-profile home private_key_path /path/to/private.key
+```
+
+### Network Tuning
+
+Optimize network performance:
+
+```bash
+# Adjust connection parameters
+./build/nexus_cli edit-profile home max_tunnels 20
+
+# Enable NAT traversal for complex networks
+./build/nexus_cli edit-profile home enable_nat_traversal true
+```
+
+### Multiple Instances
+
+Run multiple NEXUS instances with different configurations:
+
+```bash
+# Start first instance on default ports
+./build/nexus --profile home
+
+# Start second instance with custom ports in a different terminal
+./build/nexus --profile public --server-port 20053 --client-port 20443
+```
+
+## NEXUS and Hypermesh Integration
+
+NEXUS is designed to function both as a standalone protocol and as the core networking layer for the Hypermesh framework (codename NKrypt). This dual-purpose architecture ensures maximum flexibility while providing seamless integration between networking and blockchain components.
+
+### Modular Architecture
+
+NEXUS follows a "Core-Extensions" architecture pattern:
+
+- **Core Components**: Standalone functionality that operates independently
+  - QUIC Transport Layer
+  - DNS Resolution System
+  - Certificate Management
+  - Connection Handling
+  - TLD/Domain Management
+
+- **Extension Interfaces**: Well-defined integration points for Hypermesh
+  - Asset Resolution Bridge
+  - Blockchain Connector
+  - Token Authentication
+  - Advanced Distributed Features
+
+This separation allows NEXUS to operate in both standalone mode and as an integrated component of the larger Hypermesh ecosystem.
+
+### Interface Architecture
+
+NEXUS provides a standardized interface layer for Hypermesh integration:
+
+1. **Dynamic Component Registry**
+   - Runtime registration of both core and extension components
+   - Capability discovery and feature negotiation
+   - Graceful degradation when Hypermesh components aren't available
+   - Plugin architecture for extended functionality
+
+2. **Asset Resolution Interface**
+   - Extensions to DNS resolution for blockchain assets
+   - Mapping between traditional domains and asset identifiers
+   - Caching optimized for both DNS and asset resolution
+   - Unified query interface spanning both systems
+
+3. **Token Verification**
+   - Support for token-based authentication across network boundaries
+   - Verification of token validity against blockchain state
+   - Caching of token verification results for performance
+   - Rate limiting and protection against token-based attacks
+
+### Integration Patterns
+
+When operating as part of the Hypermesh ecosystem, NEXUS:
+
+1. **Delegates Asset Management** to NKrypt:
+   - Asset creation, validation, and state management remain in NKrypt
+   - NEXUS focuses on asset discovery, resolution, and network communication
+   - Clear separation of concerns between network and blockchain layers
+
+2. **Provides Communication Infrastructure** for NKrypt:
+   - Secure QUIC-based transport for all Hypermesh communications
+   - Multi-path routing for resilient blockchain operations
+   - Efficient block and transaction propagation
+   - Connection management optimized for blockchain workloads
+
+3. **Enables Cross-Network Operations**:
+   - Discovery of assets across network boundaries
+   - Secure communication between different Hypermesh instances
+   - Token-based authentication for cross-network operations
+   - Bandwidth and resource management for network-spanning requests
+
+### Configuration and Deployment
+
+NEXUS can be configured for different operational modes:
+
+```json
+{
+  "mode": "standalone",  // or "integrated"
+  "hypermesh_interface": {
+    "enabled": true,
+    "registry_endpoint": "http://localhost:8545",
+    "token_verification": true,
+    "asset_resolution": true
+  }
+}
+```
+
+This configuration-driven approach allows for flexible deployment scenarios:
+
+- **Standalone Mode**: NEXUS operates as an independent DNS-over-QUIC service
+- **Integrated Mode**: NEXUS works in concert with Hypermesh components
+- **Hybrid Mode**: NEXUS provides both standalone services and Hypermesh integration
+
+### Development and Extension
+
+Developers can extend NEXUS's capabilities through:
+
+1. **Interface Implementation**: Creating new implementations of standard interfaces
+2. **Component Registration**: Registering components with the dynamic registry
+3. **Protocol Extensions**: Developing new message types and handlers
+4. **Custom Resolvers**: Implementing specialized resolution for different asset types
+
+The plugin architecture ensures that NEXUS can evolve alongside the Hypermesh ecosystem while maintaining its core functionality as a standalone protocol.
