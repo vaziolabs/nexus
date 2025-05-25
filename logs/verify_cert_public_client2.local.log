@@ -1,0 +1,8 @@
+[NEXUS] Initializing CLI interface
+[NEXUS] Processing command of type 15
+[NEXUS] Verifying certificate for client2.local
+Verifying certificate for client2.local
+Certificate is valid for 'client2.local'
+Issued by: NEXUS Certificate Authority
+Valid until: 2025-12-31
+[NEXUS] Cleaning up CLI interface

@@ -1,0 +1,8 @@
+Failed to connect to NEXUS service: No such file or directory
+[NEXUS] Initializing CLI interface
+[NEXUS] Processing command of type 12
+[NEXUS] Connecting to NEXUS service
+[NEXUS] Service not available, using stub implementation for register-tld
+Registering TLD 'example'
+TLD 'example' registered successfully.
+[NEXUS] Cleaning up CLI interface

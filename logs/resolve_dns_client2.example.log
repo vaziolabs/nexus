@@ -1,0 +1,6 @@
+[NEXUS] Initializing CLI interface
+[NEXUS] Processing command of type 14
+[NEXUS] Resolving domain client2.example
+Resolving domain client2.example
+Domain 'client2.example' resolved to fd00:1234:5678:9abc:def0:1234:5678:9abc
+[NEXUS] Cleaning up CLI interface

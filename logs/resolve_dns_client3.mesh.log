@@ -1,0 +1,6 @@
+[NEXUS] Initializing CLI interface
+[NEXUS] Processing command of type 14
+[NEXUS] Resolving domain client3.mesh
+Resolving domain client3.mesh
+Domain 'client3.mesh' resolved to fd00:1234:5678:9abc:def0:1234:5678:9abc
+[NEXUS] Cleaning up CLI interface

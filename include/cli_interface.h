@@ -19,6 +19,10 @@ typedef enum {
     CLI_CMD_CONNECT,
     CLI_CMD_DISCONNECT,
     CLI_CMD_REGISTER_TLD,
+    CLI_CMD_REGISTER_DOMAIN,
+    CLI_CMD_RESOLVE,
+    CLI_CMD_VERIFY_CERT,
+    CLI_CMD_SEND_DATA,
     CLI_CMD_LOOKUP,
     CLI_CMD_CONFIGURE
 } cli_command_type_t;
@@ -29,6 +33,7 @@ typedef struct {
     char *profile_name;
     char *param1;
     char *param2;
+    char *param3;
     int flag1;
     int flag2;
 } cli_command_t;
@@ -55,6 +60,10 @@ int cmd_delete_profile(const char *profile_name);
 int cmd_connect(const char *profile_name);
 int cmd_disconnect(const char *profile_name);
 int cmd_register_tld(const char *profile_name, const char *tld_name);
+int cmd_register_domain(const char *profile_name, const char *domain_name, const char *ipv6_addr);
+int cmd_resolve(const char *domain_name);
+int cmd_verify_cert(const char *hostname);
+int cmd_send_data(const char *target_hostname, const char *data);
 int cmd_lookup(const char *hostname);
 int cmd_configure(void);
 

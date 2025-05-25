@@ -1,0 +1,6 @@
+[NEXUS] Initializing CLI interface
+[NEXUS] Processing command of type 16
+[NEXUS] Sending data to client1.local: Hello from client3.local to client1.local via NEXUS!
+Sending data to client1.local: Hello from client3.local to client1.local via NEXUS!
+Data sent successfully to 'client1.local'
+[NEXUS] Cleaning up CLI interface

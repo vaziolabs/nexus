@@ -35,6 +35,8 @@ TARGET := $(BUILD_DIR)/nexus
 CLI_TARGET := $(BUILD_DIR)/nexus_cli
 TEST_TARGET := $(BUILD_DIR)/nexus_tests
 HANDSHAKE_TEST_TARGET := $(BUILD_DIR)/test_quic_handshake
+IPV6_HANDSHAKE_TEST_TARGET := $(BUILD_DIR)/test_ipv6_quic_handshake
+INTEGRATION_TEST_SCRIPT := $(TESTS_DIR)/nexus_integration_test.sh
 
 # Default target
 .DEFAULT_GOAL := all
@@ -132,6 +134,7 @@ help:
 	@echo "  help       - Show this help message"
 	@echo "  test       - Build and run all unit tests"
 	@echo "  test_handshake - Build and run QUIC handshake test"
+	@echo "  test_ipv6  - Build and run IPv6 QUIC handshake test"
 	@echo "  test_tld   - Run only TLD Manager tests"
 	@echo "  test_packet - Run only Packet Protocol tests"
 	@echo "  test_config - Run only Config Manager tests"
@@ -139,9 +142,10 @@ help:
 	@echo "  test_ct    - Run only Certificate Transparency tests"
 	@echo "  test_ca    - Run only Certificate Authority tests"
 	@echo "  test_network - Run only Network Context tests"
+	@echo "  integration_test - Run the full integration test suite"
 
 # Phony targets
-.PHONY: all check_deps clean deps help test test_handshake test_tld test_packet test_config test_cli test_ct test_ca test_network
+.PHONY: all check_deps clean deps help test test_handshake test_ipv6 test_tld test_packet test_config test_cli test_ct test_ca test_network integration_test
 
 # Build will stop if any command fails
 .DELETE_ON_ERROR:
@@ -169,6 +173,13 @@ $(HANDSHAKE_TEST_TARGET): $(BUILD_DIR) $(BUILD_DIR)/test_quic_handshake.o $(SRC_
 	@echo "Handshake test build successful!"
 	@echo "Test binary location: $(HANDSHAKE_TEST_TARGET)"
 
+# Link the IPv6 handshake test executable
+$(IPV6_HANDSHAKE_TEST_TARGET): $(BUILD_DIR) $(BUILD_DIR)/test_ipv6_quic_handshake.o $(SRC_OBJS_FOR_TESTS)
+	@echo "Linking $(IPV6_HANDSHAKE_TEST_TARGET)..."
+	@$(CC) $(LDFLAGS) $(BUILD_DIR)/test_ipv6_quic_handshake.o $(SRC_OBJS_FOR_TESTS) $(LIBS) -o $(IPV6_HANDSHAKE_TEST_TARGET)
+	@echo "IPv6 handshake test build successful!"
+	@echo "Test binary location: $(IPV6_HANDSHAKE_TEST_TARGET)"
+
 # Run tests
 test: $(TEST_TARGET)
 	@echo "Running unit tests..."
@@ -178,6 +189,11 @@ test: $(TEST_TARGET)
 test_handshake: $(HANDSHAKE_TEST_TARGET)
 	@echo "Running QUIC handshake test..."
 	@./$(HANDSHAKE_TEST_TARGET)
+
+# Run IPv6 handshake test
+test_ipv6: $(IPV6_HANDSHAKE_TEST_TARGET)
+	@echo "Running IPv6 QUIC handshake test..."
+	@./$(IPV6_HANDSHAKE_TEST_TARGET)
 
 # --- Individual Test Targets ---
 test_tld: $(TEST_TARGET)
@@ -215,3 +231,9 @@ TEST_FILES_SRCS = $(wildcard $(TESTS_DIR)/*.c)
 TEST_FILES_OBJS = $(TEST_FILES_SRCS:$(TESTS_DIR)/%.c=$(BUILD_DIR)/%.o)
 # Use the common objects for the source files needed in tests
 SRC_OBJS_FOR_TESTS := $(COMMON_OBJS)
+
+# Integration test target
+integration_test: all
+	@echo "Running NEXUS integration tests..."
+	@chmod +x $(INTEGRATION_TEST_SCRIPT)
+	@$(INTEGRATION_TEST_SCRIPT)

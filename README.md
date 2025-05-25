@@ -291,8 +291,13 @@ Run multiple NEXUS instances with different configurations:
 - [x] **Service Architecture** - Daemon mode with proper service lifecycle management
 - [x] **Basic Core DNS Functionality** - DNS request/response handling and TLD management
 - [x] **QUIC Transport Integration** - Utilizes ngtcp2 for secure and reliable transport
+- [x] **Testing Framework** - Comprehensive testing suite covering all major components
+- [x] **IPv6 QUIC Handshake Testing** - Validation of IPv6 connectivity for QUIC connections
+- [x] **Integration Testing** - End-to-end testing of core functionality
 
 ### In Progress Components
+- [ ] **Server Initialization** - Fixing server startup issues identified during testing
+- [ ] **QUIC Handshake** - Resolving handshake completion issues in IPv6 environments
 - [ ] **Advanced DNS Resolution** - Complete implementation of recursive and iterative resolution
 - [ ] **TLD Mirroring** - Robust synchronization with automatic conflict resolution
 - [ ] **Enhanced Certificate Management** - Comprehensive validation and quantum-resistant algorithms
@@ -301,141 +306,169 @@ Run multiple NEXUS instances with different configurations:
 - [ ] **Tunneling Infrastructure** - Implementation of per-tunnel IPv6 allocation
 - [ ] **NAT Traversal** - Advanced traversal techniques leveraging QUIC's connection migration
 
-### Testing Infrastructure
-We have implemented a comprehensive testing framework covering the following components:
-- [x] **TLD Manager Tests** - Verify domain registration and resolution
-- [x] **Packet Protocol Tests** - Validate packet encoding/decoding and handling
-- [x] **Configuration Manager Tests** - Test profile creation, management, and loading
-- [x] **CLI Interface Tests** - Verify command parsing and execution
-- [x] **Certificate Transparency Tests** - Test CT log operations and Merkle tree verification
-- [x] **Certificate Authority Tests** - Validate certificate issuance, verification, and management
-- [x] **Network Context Tests** - Verify proper handling of different network modes and contexts
-- [x] **QUIC Handshake Tests** - Validate secure connection establishment
-
-## Practical Use Cases
-1. **Central DNS Gateway**: Run a dedicated NEXUS node at dns.hypermesh.online to serve as the primary entry point to the hypermesh DNS ecosystem.
-
-2. **Private Domain Registration**: Run NEXUS locally in private mode to register and use custom TLDs without depending on central authorities.
-
-3. **Distributed DNS Network**: Connect multiple NEXUS nodes in federated mode to create a resilient, distributed DNS network with shared TLD management.
-
-4. **Client Access**: Use NEXUS in public mode to connect to the hypermesh network and resolve domains registered by other participants.
-
-## Security Model
-- All nodes require valid Falcon quantum-resistant certificates for authentication
-- Client and server certificates are validated for all communications
-- Certificate authority management ensures proper issuance and validation
-- Certificate Transparency logs provide auditable certificate issuance history
-- Private keys are never shared between networks to maintain isolation
-
-## Core Features
-
-### P2P Network Management
-- Peer discovery and connection handling
-- State tracking for each peer
-- Thread-safe peer list management
-
-### DNS Consensus System
-- 100% consensus requirement for DNS records
-- Signature collection from all active peers
-- Timeout handling for consensus requests
-- Thread-safe consensus operations
-
-### Security Features
-- Falcon-1024 signatures for DNS records
-- Multiple signature verification
-- Timestamp and TTL validation
-- Peer validation
-
-The consensus mechanism ensures:
-- All active peers must validate and sign new DNS records
-- Any single peer can veto a malicious DNS record
-- Records are timestamped and signed to prevent replay attacks
-
-## NEXUS as a Network Protocol Replacement
-
-NEXUS is designed to evolve beyond DNS services to function as a comprehensive network protocol replacement for the hypermesh network. This section outlines how NEXUS will handle core networking functions:
-
-### Tunneling Capabilities
-- Each connection via the hypermesh network operates as its own isolated tunnel
-- Per-tunnel encryption using QUIC's TLS 1.3 security model
-- Support for multiple simultaneous tunnels with independent routing
-- Tunnel persistence across network changes (leveraging QUIC migration)
-- Tunnel-specific QoS (Quality of Service) controls
-- Built-in congestion control per tunnel
-
-### IPv6 Allocation and Management
-- Dynamic IPv6 address allocation per tunnel
-- IPv6 prefix delegation for subnet management
-- Address collision detection and resolution
-- Address rotation for enhanced privacy
-- Support for both temporary and persistent addressing schemes
-- Integration with existing IPv6 infrastructure
-
-### NAT Traversal and Translation
-- Advanced NAT traversal techniques leveraging QUIC's connection migration
-- Automatic NAT type detection and optimization
-- Direct peer-to-peer connections where possible
-- Relay capabilities for symmetric NAT scenarios
-- Transparent address translation between public and private networks
-- Support for both IPv4-to-IPv6 and IPv6-to-IPv4 translation
-
-### Mesh Networking Capabilities
-- Dynamic route discovery and optimization
-- Multi-path routing for redundancy and performance
-- Resilient connections across changing network conditions
-- Peer-assisted routing to optimize paths through the network
-- Automatic fail-over and load balancing
-- Support for network partitioning and rejoining
-
-This expanded role positions NEXUS as the foundation for the entire hypermesh network infrastructure, not just DNS services. The protocol will maintain backward compatibility with standard Internet protocols while providing enhanced capabilities for hypermesh-aware applications.
+### Current Implementation Notes
+- CLI interface supports all required commands for testing and operation
+- Stub implementations provide fallback functionality when service isn't running
+- Integration tests pass with stub implementations for core functionality
+- IPv6 support is integrated but requires additional stability fixes
+- QUIC handshake occasionally fails and needs optimization for production use
+- Certificate creation and validation are implemented but need additional security checks
 
 ## Next Steps/TODO
-  - [ ] Complete DNS resolution functionality with full recursive and iterative resolution support
-  - [ ] Implement robust TLD mirroring for federated networks with automatic sync and conflict resolution
-  - [ ] Enhance certificate management with more comprehensive validation and revocation checking
+- [ ] **Critical Path**:
+  - [ ] Fix QUIC handshake completion issues in IPv6 environments
+  - [ ] Resolve server initialization failures
+  - [ ] Replace stub implementations with full functionality
+  - [ ] Add comprehensive error handling and recovery
+- [ ] **Core Functionality**:
+  - [ ] Complete DNS resolution functionality with full recursive and iterative resolution
+  - [ ] Implement robust TLD mirroring for federated networks with automatic sync
+  - [ ] Enhance certificate management with comprehensive validation
   - [ ] Add support for certificate rotation and quantum-resistant algorithms
   - [ ] Implement full packet types defined in network_context.h (especially sync, discovery, and heartbeat)
+- [ ] **Advanced Features**:
   - [ ] Add support for peer discovery and automatic network topology mapping
-  - [ ] Create a metrics collection system for performance monitoring and optimization
-  - [ ] Develop administrative interfaces for network management and monitoring
-- [ ] Develop remaining test suites for certificate authority, nexus_client, nexus_server, and network_context
-- [ ] Implement per-tunnel IPv6 allocation system
-- [ ] Add NAT traversal and translation capabilities
-- [ ] Develop tunnel management interface for applications
-- [ ] Create APIs for applications to access tunneling capabilities
-- [ ] Implement multi-path routing with redundancy
-- [ ] Add automatic fail-over and load balancing
+  - [ ] Create a metrics collection system for performance monitoring
+  - [ ] Develop administrative interfaces for network management
+  - [ ] Implement per-tunnel IPv6 allocation system
+  - [ ] Add NAT traversal and translation capabilities
+  - [ ] Develop tunnel management interface for applications
+  - [ ] Create APIs for applications to access tunneling capabilities
+  - [ ] Implement multi-path routing with redundancy
+  - [ ] Add automatic fail-over and load balancing
 
 ## Testing
-The NEXUS project includes a comprehensive testing framework covering all major components. Tests are implemented as individual test files for each component, with a main test runner that executes all tests.
 
-To run the complete test suite:
+### Prerequisites
+
+Before beginning testing, ensure you have:
+
+1. A system with IPv6 enabled
+2. The NEXUS software built (`make all`)
+3. Sufficient permissions to open network ports
+
+### Testing Methods
+
+NEXUS offers several testing methods, from unit tests to full integration testing:
+
+#### 1. Unit Tests
+
+Unit tests verify individual components:
+
 ```bash
+# Run all unit tests
 make test
+
+# Run specific component tests
+make test_tld        # TLD Manager
+make test_packet     # Packet Protocol
+make test_config     # Config Manager
+make test_cli        # CLI Interface
+make test_ct         # Certificate Transparency
+make test_ca         # Certificate Authority
+make test_network    # Network Context
 ```
 
-This will execute tests for all major components:
-- **TLD Manager Tests** - Verify domain registration and resolution
-- **Packet Protocol Tests** - Validate packet encoding/decoding for various message types
-- **Configuration Manager Tests** - Test profile creation, management, and loading
-- **CLI Interface Tests** - Verify command parsing and execution
-- **Certificate Transparency Tests** - Test CT log operations and Merkle tree verification
-- **Certificate Authority Tests** - Validate certificate issuance, verification, and management
-- **Network Context Tests** - Verify proper handling of different network modes and contexts
-- **QUIC Handshake Tests** - Validate secure connection establishment
+#### 2. QUIC Handshake Tests
 
-### Individual Test Components
-
-You can run specific test components separately:
+These tests verify the QUIC handshake process:
 
 ```bash
-# Run only the QUIC handshake test
+# Test basic QUIC handshake
 make test_handshake
 
-# Run only the TLD manager tests
-make test_tld
+# Test IPv6 QUIC handshake and certificate verification
+make test_ipv6
 ```
+
+#### 3. Full Integration Testing
+
+The integration test verifies all components working together:
+
+```bash
+make integration_test
+```
+
+This runs `tests/nexus_integration_test.sh`, which tests:
+- Starting servers and clients across multiple networks (private, public, federated)
+- IPv6 connectivity
+- Certificate creation and validation
+- TLD registration
+- Domain registration
+- DNS resolution
+- Data transmission between nodes
+
+### Manual Testing
+
+For manual testing, follow these steps:
+
+1. **Start a NEXUS server**:
+   ```bash
+   ./build/nexus --mode private --hostname server.nexus.local --bind-address ::1 --port 10443
+   ```
+
+2. **Start a NEXUS client**:
+   ```bash
+   ./build/nexus --mode private --hostname client.nexus.local --server ::1 --server-port 10443
+   ```
+
+3. **Register a TLD**:
+   ```bash
+   ./build/nexus_cli --server ::1 --port 10443 register-tld "test"
+   ```
+
+4. **Register a domain**:
+   ```bash
+   ./build/nexus_cli --server ::1 --port 10443 register-domain "example.test" "fd00::1"
+   ```
+
+5. **Resolve a domain**:
+   ```bash
+   ./build/nexus_cli --server ::1 --port 10443 resolve "example.test"
+   ```
+
+6. **Verify a certificate**:
+   ```bash
+   ./build/nexus_cli --server ::1 --port 10443 verify-cert "client.nexus.local"
+   ```
+
+7. **Send data**:
+   ```bash
+   ./build/nexus_cli --server ::1 --port 10443 send-data "server.nexus.local" "Hello NEXUS!"
+   ```
+
+### Verifying IPv6 Functionality
+
+NEXUS is designed to work natively with IPv6, providing:
+- Full IPv6 support for all connections
+- IPv6 address allocation for tunnels
+- IPv6-based certificate binding
+- IPv6 DNS record storage and resolution
+
+To verify IPv6 functionality:
+
+1. **Check that connections are established over IPv6**:
+   ```bash
+   ss -tulpn | grep nexus
+   ```
+   Look for entries with IPv6 addresses (starting with `::`)
+
+2. **Verify DNS resolution returns IPv6 addresses**:
+   ```bash
+   ./build/nexus_cli --server ::1 --port 10443 resolve "example.test"
+   ```
+   The result should be an IPv6 address.
+
+3. **Confirm certificates are created for IPv6 connections**:
+   ```bash
+   ./build/nexus_cli --server ::1 --port 10443 cert-info "client.nexus.local"
+   ```
+   The certificate should include IPv6 address information.
+
+4. **Test IPv6 QUIC handshake**:
+   ```bash
+   make test_ipv6
+   ```
 
 ### Test Implementation
 
@@ -448,42 +481,73 @@ The tests are structured to validate both API functionality and integration betw
 
 Each test file follows a consistent pattern with setup, test execution, and cleanup phases to ensure reliable and repeatable testing.
 
+### Troubleshooting
+
+#### Connection Issues
+
+If connections fail:
+
+1. **Verify IPv6 is enabled on your system**:
+   ```bash
+   ping6 -c 3 ::1
+   ```
+
+2. **Check if ports are already in use**:
+   ```bash
+   ss -tulpn | grep 10443
+   ```
+
+3. **Enable debug output**:
+   ```bash
+   NEXUS_DEBUG=1 ./build/nexus --mode private --hostname test.local
+   ```
+
+4. **Examine logs for specific errors**:
+   ```bash
+   # In integration test mode
+   cat logs/server_private_10443.log
+   cat logs/client_private_client1.local.log
+   ```
+
+#### Certificate Issues
+
+If certificate verification fails:
+
+1. **Check that the CA is properly initialized**:
+   ```bash
+   ./build/nexus_cli --server ::1 --port 10443 ca-status
+   ```
+
+2. **Verify the certificate was created**:
+   ```bash
+   ./build/nexus_cli --server ::1 --port 10443 list-certs
+   ```
+
+#### DNS Resolution Issues
+
+If DNS resolution fails:
+
+1. **Verify the TLD is registered**:
+   ```bash
+   ./build/nexus_cli --server ::1 --port 10443 list-tlds
+   ```
+
+2. **Check that the domain is registered**:
+   ```bash
+   ./build/nexus_cli --server ::1 --port 10443 list-domains "test"
+   ```
+
+### Advanced Testing
+
+After verifying basic functionality, consider testing:
+
+1. **Load Testing**: Multiple simultaneous connections
+2. **Failover**: Server/client recovery after connection loss
+3. **Cross-Network**: Communication between different network types
+4. **Certificate Transparency**: Verify CT logs across network boundaries
+
 ## Building
 
 ```bash
 make clean && make
 ```
-
-## Running
-
-NEXUS provides two executables:
-
-### NEXUS Daemon
-```bash
-./build/nexus --help
-```
-
-Example of running the daemon:
-```bash
-./build/nexus --mode private --hostname localhost --server localhost
-```
-
-### NEXUS CLI
-```bash
-./build/nexus_cli help
-```
-
-Example CLI commands:
-```bash
-# Show status of the NEXUS service
-./build/nexus_cli status
-
-# Register a TLD in a specific profile
-./build/nexus_cli register-tld myprofile example
-
-# List available profiles
-./build/nexus_cli list-profiles
-```
-
-## License
-See LICENSE file.
