@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h> // For size_t
 #include <sys/types.h> // For ssize_t
+#include "dns_types.h" // Include for payload_dns_query_t, payload_dns_response_t
 
 // NEXUS packet types
 typedef enum {
@@ -51,5 +52,19 @@ ssize_t deserialize_payload_tld_register_req(const uint8_t *buffer, size_t buffe
 
 ssize_t serialize_payload_tld_register_resp(const payload_tld_register_resp_t *payload, uint8_t *buffer, size_t buffer_len);
 ssize_t deserialize_payload_tld_register_resp(const uint8_t *buffer, size_t buffer_len, payload_tld_register_resp_t *payload);
+
+// DNS Query/Response Payload Serialization/Deserialization
+ssize_t get_serialized_payload_dns_query_size(const payload_dns_query_t* payload);
+ssize_t serialize_payload_dns_query(const payload_dns_query_t* payload, uint8_t* out_buf, size_t out_buf_len);
+ssize_t deserialize_payload_dns_query(const uint8_t* data, size_t data_len, payload_dns_query_t* payload);
+
+ssize_t get_serialized_payload_dns_response_size(const payload_dns_response_t* payload);
+ssize_t serialize_payload_dns_response(const payload_dns_response_t* payload, uint8_t* out_buf, size_t out_buf_len);
+ssize_t deserialize_payload_dns_response(const uint8_t* data, size_t data_len, payload_dns_response_t* payload);
+
+// DNS Record Serialization/Deserialization (if they become standalone)
+// ssize_t get_serialized_dns_record_size(const dns_record_t* record);
+// ssize_t serialize_dns_record(const dns_record_t* record, uint8_t* out_buf, size_t out_buf_len);
+// ssize_t deserialize_dns_record(const uint8_t* data, size_t data_len, dns_record_t* record, size_t* rdata_len_out);
 
 #endif // PACKET_PROTOCOL_H 

@@ -1,29 +1,35 @@
 #include "../include/certificate_transparency.h"
+#include "../include/certificate_authority.h"
 #include "../include/debug.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <openssl/sha.h>
+#include <pthread.h>
 
 // Initialize certificate transparency
-int init_certificate_transparency(network_context_t *net_ctx, ct_log_t **ct_log) {
-    if (!net_ctx || !ct_log) {
-        return -1;
+ct_log_t* init_certificate_transparency(network_context_t *net_ctx) {
+    if (!net_ctx || !net_ctx->hostname || !net_ctx->mode) {
+        fprintf(stderr, "Error: Invalid network context for CT log initialization.\n");
+        return NULL;
+    }
+
+    // Construct a log filename, e.g., "private_myhost_ct.log"
+    char log_filename[512];
+    snprintf(log_filename, sizeof(log_filename), "%s_%s_ct.log", net_ctx->mode, net_ctx->hostname);
+
+    ct_log_t *log = create_ct_log(log_filename, net_ctx->hostname, net_ctx->mode);
+    if (!log) {
+        fprintf(stderr, "Error: Failed to create CT log during initialization.\n");
+        return NULL;
     }
     
-    dlog("Initializing certificate transparency for network context");
-    
-    // Create a new CT log for this network context
-    char scope_id[128];
-    snprintf(scope_id, sizeof(scope_id), "%s-%s", net_ctx->mode, net_ctx->hostname);
-    
-    if (create_ct_log(scope_id, ct_log) != 0) {
-        fprintf(stderr, "Failed to create CT log for scope %s\n", scope_id);
-        return -1;
-    }
-    
-    return 0;
+    // The scope_id is now set inside create_ct_log based on its params
+    // log->scope_id = strdup(scope_id_buffer); // No longer needed here directly
+
+    printf("Certificate Transparency log initialized for scope: %s\n", log->scope_id ? log->scope_id : "N/A");
+    return log;
 }
 
 // Clean up certificate transparency
@@ -46,8 +52,15 @@ void cleanup_certificate_transparency(ct_log_t *ct_log) {
     
     // Free merkle tree if it exists
     if (ct_log->merkle_tree) {
-        // TODO: Implement merkle tree cleanup
-        // For now, just set to NULL
+        // Check if it's not the (void*)1 placeholder before treating as merkle_tree_t*
+        if (ct_log->merkle_tree != (void*)1) {
+            merkle_tree_t *tree = (merkle_tree_t *)ct_log->merkle_tree;
+            if (tree->root) { // If root was allocated, free it
+                // In a real tree, this would be a recursive free of all nodes
+                free(tree->root);
+            }
+            free(tree); // Free the tree structure itself
+        }
         ct_log->merkle_tree = NULL;
     }
     
@@ -62,73 +75,108 @@ void cleanup_certificate_transparency(ct_log_t *ct_log) {
 }
 
 // Create a new CT log
-int create_ct_log(const char *scope_id, ct_log_t **ct_log) {
-    if (!scope_id || !ct_log) {
-        return -1;
+ct_log_t* create_ct_log(const char *log_filename, const char *node_hostname, const char *network_mode) {
+    ct_log_t *log = (ct_log_t*)malloc(sizeof(ct_log_t));
+    if (!log) {
+        perror("Failed to allocate memory for CT log");
+        return NULL;
     }
     
-    dlog("Creating new CT log for scope %s", scope_id);
-    
-    // Allocate the log
-    *ct_log = malloc(sizeof(ct_log_t));
-    if (!*ct_log) {
-        fprintf(stderr, "Failed to allocate CT log\n");
-        return -1;
-    }
-    
-    memset(*ct_log, 0, sizeof(ct_log_t));
-    
-    // Initialize the log
-    (*ct_log)->scope_id = strdup(scope_id);
-    (*ct_log)->max_entries = CT_LOG_MAX_ENTRIES;
-    (*ct_log)->entry_count = 0;
-    
-    // Allocate entries array
-    (*ct_log)->entries = malloc(sizeof(ct_log_entry_t*) * (*ct_log)->max_entries);
-    if (!(*ct_log)->entries) {
-        fprintf(stderr, "Failed to allocate CT log entries array\n");
-        free((*ct_log)->scope_id);
-        free(*ct_log);
-        *ct_log = NULL;
-        return -1;
-    }
+    // Initialize the log structure
+    memset(log, 0, sizeof(ct_log_t));
     
     // Initialize mutex
-    if (pthread_mutex_init(&(*ct_log)->lock, NULL) != 0) {
-        fprintf(stderr, "Failed to initialize CT log mutex\n");
-        free((*ct_log)->entries);
-        free((*ct_log)->scope_id);
-        free(*ct_log);
-        *ct_log = NULL;
-        return -1;
+    if (pthread_mutex_init(&log->lock, NULL) != 0) {
+        perror("Failed to initialize mutex for CT log");
+        free(log);
+        return NULL;
     }
     
-    // TODO: Generate Falcon-1024 key pair for the log
-    // For now, just fill with zeros
-    memset((*ct_log)->public_key, 0, sizeof((*ct_log)->public_key));
-    memset((*ct_log)->private_key, 0, sizeof((*ct_log)->private_key));
+    // Initialize entries array
+    log->max_entries = 1000; // Default max entries
+    log->entries = (ct_log_entry_t**)malloc(sizeof(ct_log_entry_t*) * log->max_entries);
+    if (!log->entries) {
+        perror("Failed to allocate memory for CT log entries");
+        pthread_mutex_destroy(&log->lock);
+        free(log);
+        return NULL;
+    }
+    memset(log->entries, 0, sizeof(ct_log_entry_t*) * log->max_entries);
     
-    return 0;
+    // Set log filename
+    if (log_filename) {
+        log->log_filename = strdup(log_filename);
+        if (!log->log_filename) {
+            perror("Failed to allocate memory for log filename");
+            free(log->entries);
+            pthread_mutex_destroy(&log->lock);
+            free(log);
+            return NULL;
+        }
+    } else {
+        log->log_filename = NULL;
+    }
+    
+    // Create a unique scope ID based on network mode and node hostname
+    char scope_id_buf[256] = {0};
+    if (network_mode || node_hostname) {
+        snprintf(scope_id_buf, sizeof(scope_id_buf), "%s@%s", network_mode ? network_mode : "default_mode", node_hostname ? node_hostname : "default_host");
+        log->scope_id = strdup(scope_id_buf);
+    } else {
+        log->scope_id = strdup("default_scope");
+    }
+    if (!log->scope_id) {
+        perror("Failed to allocate memory for log scope_id");
+        free(log->entries);
+        free(log);
+        return NULL;
+    }
+    
+    // Initialize Falcon keys for the log
+    log->keys = (falcon_keys_t*)malloc(sizeof(falcon_keys_t));
+    if (!log->keys) {
+        perror("Failed to allocate memory for Falcon keys");
+        free(log->scope_id);
+        free(log->entries);
+        free(log);
+        return NULL;
+    }
+
+    // Generate Falcon keypair for the log
+    if (generate_falcon_keypair(log->keys->public_key, log->keys->private_key) != 0) {
+        fprintf(stderr, "Failed to generate Falcon keypair for CT log\n");
+        free(log->keys);
+        free(log->scope_id);
+        free(log->entries);
+        free(log);
+        return NULL;
+    }
+
+    printf("CT Log: Falcon keys initialized for log scope %s.\n", log->scope_id);
+
+    return log;
 }
 
 // Load a CT log from disk
 int load_ct_log(const char *path, ct_log_t **ct_log) {
-    if (!path || !ct_log) {
-        return -1;
-    }
-    
-    dlog("Loading CT log from %s (stub implementation)", path);
-    
     // This is a stub implementation
-    // In a real implementation, this would load from disk
-    
-    // For now, just create an empty log
-    if (create_ct_log("stub", ct_log) != 0) {
-        fprintf(stderr, "Failed to create stub CT log\n");
+    // In a real implementation, this would load the log from the given path
+    printf("load_ct_log: STUB IMPLEMENTATION. Path: %s\n", path);
+    if (!path || !ct_log) {
+        return -1; // Invalid arguments
+    }
+
+    // Create a new dummy log for now, as if it were loaded
+    // Use the new signature for create_ct_log: ct_log_t* create_ct_log(const char *log_filename, const char *node_hostname, const char *network_mode)
+    *ct_log = create_ct_log(path, "loaded_host", "loaded_mode");
+    if (!*ct_log) {
+        fprintf(stderr, "load_ct_log: Failed to create dummy log for path %s\n", path);
         return -1;
     }
     
-    return 0;
+    // Simulate loading some data or setting a specific state if needed for testing stubs
+    printf("load_ct_log: Successfully created dummy log for path %s\n", path);
+    return 0; // Success
 }
 
 // Save a CT log to disk
@@ -151,63 +199,129 @@ int save_ct_log(const ct_log_t *ct_log, const char *path) {
     
     fclose(f);
     
-    return 0;
+    return 0; // Success
 }
 
 // Add a certificate to the CT log
-int add_certificate_to_ct_log(ct_log_t *ct_log, nexus_cert_t *cert) {
-    if (!ct_log || !cert) {
-        return -1;
+ct_log_entry_t* add_certificate_to_ct_log(ct_log_t *log, nexus_cert_t *cert, const uint8_t *sct_signature, size_t sct_signature_len) {
+    if (!log || !cert) {
+        fprintf(stderr, "Error: Invalid arguments to add_certificate_to_ct_log.\n");
+        return NULL;
     }
-    
-    dlog("Adding certificate to CT log for scope %s", ct_log->scope_id);
-    
-    pthread_mutex_lock(&ct_log->lock);
-    
-    // Check if we have room
-    if (ct_log->entry_count >= ct_log->max_entries) {
-        fprintf(stderr, "CT log is full\n");
-        pthread_mutex_unlock(&ct_log->lock);
-        return -1;
+
+    pthread_mutex_lock(&log->lock);
+
+    if (log->entry_count >= log->max_entries) {
+        fprintf(stderr, "Error: CT log is full. Cannot add new certificate.\n");
+        pthread_mutex_unlock(&log->lock);
+        return NULL;
     }
-    
-    // Create a new entry
-    ct_log_entry_t *entry = malloc(sizeof(ct_log_entry_t));
+
+    ct_log_entry_t *entry = (ct_log_entry_t *)malloc(sizeof(ct_log_entry_t));
     if (!entry) {
-        fprintf(stderr, "Failed to allocate CT log entry\n");
-        pthread_mutex_unlock(&ct_log->lock);
-        return -1;
+        perror("Failed to allocate memory for CT log entry");
+        pthread_mutex_unlock(&log->lock);
+        return NULL;
+    }
+
+    entry->timestamp = (uint64_t)time(NULL); // Current time
+    
+    // Create a copy of the certificate data for the log entry
+    entry->cert = (nexus_cert_t*)malloc(sizeof(nexus_cert_t));
+    if(!entry->cert) {
+        perror("Failed to allocate memory for cert in log entry");
+        free(entry);
+        pthread_mutex_unlock(&log->lock);
+        return NULL;
     }
     
-    memset(entry, 0, sizeof(ct_log_entry_t));
+    // Copy certificate data
+    if (cert->common_name) {
+        entry->cert->common_name = strdup(cert->common_name);
+        if (!entry->cert->common_name) {
+             perror("Failed to duplicate common_name for log entry");
+             free(entry->cert);
+             free(entry);
+             pthread_mutex_unlock(&log->lock);
+             return NULL;
+        }
+    } else {
+        entry->cert->common_name = NULL;
+    }
     
-    // Set entry fields
-    entry->timestamp = (uint64_t)time(NULL);
-    entry->cert = cert;  // Note: This assumes the cert will remain valid
-    entry->scope_id = strdup(ct_log->scope_id);
+    // Copy other certificate fields
+    entry->cert->valid_from = cert->valid_from;
+    entry->cert->valid_until = cert->valid_until;
+    entry->cert->cert_type = cert->cert_type;
+    memcpy(entry->cert->signature, cert->signature, sizeof(cert->signature));
+
+    // Create message to sign (cert + timestamp + log_id)
+    uint8_t message[2048];
+    size_t message_len = 0;
     
-    // TODO: Sign the certificate with the log's private key
-    // For now, just fill with zeros
-    memset(entry->signature, 0, sizeof(entry->signature));
+    // Add certificate common_name to message
+    if (entry->cert->common_name) {
+        size_t common_name_len = strlen(entry->cert->common_name);
+        memcpy(message + message_len, entry->cert->common_name, common_name_len);
+        message_len += common_name_len;
+    }
     
-    // Hash the log's public key to create the log ID
-    SHA256(ct_log->public_key, sizeof(ct_log->public_key), entry->log_id);
+    // Add certificate signature to message
+    memcpy(message + message_len, entry->cert->signature, sizeof(entry->cert->signature));
+    message_len += sizeof(entry->cert->signature);
     
-    // Add the entry to the log
-    ct_log->entries[ct_log->entry_count++] = entry;
+    // Add timestamp to message
+    memcpy(message + message_len, &entry->timestamp, sizeof(entry->timestamp));
+    message_len += sizeof(entry->timestamp);
     
-    // Rebuild the merkle tree
-    // TODO: Implement incremental merkle tree updates for efficiency
-    build_merkle_tree(ct_log);
+    // Calculate SHA-256 of log's public key for log_id
+    // In a real implementation, this would be:
+    // SHA256(log->keys->public_key, sizeof(log->keys->public_key), entry->log_id);
+    // For now, we'll use a simplified hash (first 32 bytes of public key)
+    memcpy(entry->log_id, log->keys->public_key, sizeof(entry->log_id));
     
-    pthread_mutex_unlock(&ct_log->lock);
+    // Add log_id to message
+    memcpy(message + message_len, entry->log_id, sizeof(entry->log_id));
+    message_len += sizeof(entry->log_id);
     
-    return 0;
+    // Sign the entry with the log's private key
+    if (falcon_sign(log->keys->private_key, message, message_len, entry->signature) != 0) {
+        fprintf(stderr, "Failed to sign CT log entry\n");
+        if(entry->cert->common_name) free(entry->cert->common_name);
+        free(entry->cert);
+        free(entry);
+        pthread_mutex_unlock(&log->lock);
+        return NULL;
+    }
+
+    entry->scope_id = strdup(log->scope_id); // Copy scope from log
+    if(!entry->scope_id){
+        perror("Failed to duplicate scope_id for log entry");
+        if(entry->cert->common_name) free(entry->cert->common_name);
+        free(entry->cert);
+        free(entry);
+        pthread_mutex_unlock(&log->lock);
+        return NULL;
+    }
+
+    log->entries[log->entry_count++] = entry;
+
+    // Rebuild Merkle tree (or update it incrementally)
+    // build_merkle_tree(log); // This might be inefficient; consider incremental updates or batching.
+    // For now, assume it's called separately or handled by the caller.
+
+    pthread_mutex_unlock(&log->lock);
+    
+    // Suppress unused parameter warnings for sct_signature and sct_signature_len if not used yet
+    (void)sct_signature;
+    (void)sct_signature_len;
+
+    return entry;
 }
 
 // Verify that a certificate is in the CT log
-int verify_certificate_in_ct_log(ct_log_t *ct_log, nexus_cert_t *cert, ct_proof_t **proof) {
-    if (!ct_log || !cert) {
+int verify_certificate_in_ct_log(ct_log_t *ct_log, nexus_cert_t *cert_to_find, ct_proof_t **proof) {
+    if (!ct_log || !cert_to_find) {
         return -1;
     }
     
@@ -221,8 +335,9 @@ int verify_certificate_in_ct_log(ct_log_t *ct_log, nexus_cert_t *cert, ct_proof_
     
     for (int i = 0; i < ct_log->entry_count; i++) {
         // In a real implementation, we would compare the certificate contents
-        // For now, just compare the pointers
-        if (ct_log->entries[i]->cert == cert) {
+        // For now, just compare the common name
+        if (ct_log->entries[i]->cert->common_name && cert_to_find->common_name &&
+            strcmp(ct_log->entries[i]->cert->common_name, cert_to_find->common_name) == 0) {
             found = 1;
             index = i;
             break;
@@ -235,18 +350,19 @@ int verify_certificate_in_ct_log(ct_log_t *ct_log, nexus_cert_t *cert, ct_proof_
         return -1;
     }
     
-    // If a proof is requested, generate one
-    if (proof) {
-        if (generate_merkle_proof(ct_log, cert, proof) != 0) {
-            fprintf(stderr, "Failed to generate merkle proof\n");
-            pthread_mutex_unlock(&ct_log->lock);
-            return -1;
+    // If proof is requested, generate it
+    if (found && proof) {
+        *proof = generate_merkle_proof(ct_log, cert_to_find);
+        if (!*proof) {
+            fprintf(stderr, "Error: Failed to generate Merkle proof for certificate.\n");
+            // No specific error code to return here to indicate proof generation failure vs. not found
+            // The function's main job is to find; proof is extra.
         }
     }
     
     pthread_mutex_unlock(&ct_log->lock);
     
-    return 0;
+    return found; // 1 if found, 0 if not
 }
 
 // Build a merkle tree from the certificates in the log
@@ -255,68 +371,123 @@ int build_merkle_tree(ct_log_t *ct_log) {
         return -1;
     }
     
-    dlog("Building merkle tree for CT log (stub implementation)");
-    
-    // This is a stub implementation
-    // In a real implementation, this would build a proper merkle tree
-    
-    // For now, just set the merkle tree to a dummy value
-    ct_log->merkle_tree = (void*)1;
+    dlog("Building merkle tree for CT log (stub - minimal allocation)");
+
+    // Free existing tree to prevent leaks if called multiple times.
+    // Note: This simple free won't handle a real tree with many nodes.
+    if (ct_log->merkle_tree && ct_log->merkle_tree != (void*)1) {
+        merkle_tree_t *old_tree = (merkle_tree_t *)ct_log->merkle_tree;
+        // In a real tree, old_tree->root would be recursively freed here if it existed.
+        // For this stub, if root was ever allocated, it should be freed too.
+        if (old_tree->root) { 
+            free(old_tree->root); 
+        }
+        free(old_tree);
+    }
+    ct_log->merkle_tree = NULL; // Set to NULL before new allocation
+
+    merkle_tree_t *tree = (merkle_tree_t *)malloc(sizeof(merkle_tree_t));
+    if (!tree) {
+        perror("Failed to allocate Merkle tree (stub)");
+        return -1;
+    }
+    tree->root = NULL; // CRITICAL: Initialize root to NULL for safe checking in generate_merkle_proof
+    tree->leaf_count = ct_log->entry_count; // Or 0, as it's a stub
+
+    ct_log->merkle_tree = tree;
     
     return 0;
 }
 
 // Verify a merkle proof
-int verify_merkle_proof(ct_proof_t *proof, ct_log_t *ct_log) {
-    if (!proof || !ct_log) {
+int verify_merkle_proof(ct_proof_t *proof, const uint8_t *expected_root_hash, size_t root_hash_len, ct_log_entry_t *entry_to_verify) {
+    if (!proof || !expected_root_hash || !entry_to_verify) {
         return -1;
     }
     
-    dlog("Verifying merkle proof (stub implementation)");
+    // Stub implementation for now
+    // In a real implementation, this would verify the Merkle proof
     
-    // This is a stub implementation
-    // In a real implementation, this would verify the proof against the merkle tree
+    // Verify that the entry's signature is valid
+    // Create message to verify (cert + timestamp + log_id)
+    uint8_t message[2048];
+    size_t message_len = 0;
     
-    // For now, just return success
-    return 0;
+    // Add certificate common_name to message
+    if (entry_to_verify->cert->common_name) {
+        size_t common_name_len = strlen(entry_to_verify->cert->common_name);
+        memcpy(message + message_len, entry_to_verify->cert->common_name, common_name_len);
+        message_len += common_name_len;
+    }
+    
+    // Add certificate signature to message
+    memcpy(message + message_len, entry_to_verify->cert->signature, sizeof(entry_to_verify->cert->signature));
+    message_len += sizeof(entry_to_verify->cert->signature);
+    
+    // Add timestamp to message
+    memcpy(message + message_len, &entry_to_verify->timestamp, sizeof(entry_to_verify->timestamp));
+    message_len += sizeof(entry_to_verify->timestamp);
+    
+    // Add log_id to message
+    memcpy(message + message_len, entry_to_verify->log_id, sizeof(entry_to_verify->log_id));
+    message_len += sizeof(entry_to_verify->log_id);
+    
+    // Verify the signature using Falcon
+    if (falcon_verify_sig(proof->log_pubkey, message, message_len, entry_to_verify->signature) != 0) {
+        fprintf(stderr, "CT log entry signature verification failed\n");
+        return -1;
+    }
+    
+    // In a real implementation, we would also verify the Merkle path
+    // For now, just compare the root hash
+    if (root_hash_len != 32) {
+        return -1; // Invalid root hash length
+    }
+    
+    // For stub, assume verification passed
+    printf("verify_merkle_proof: STUB implementation. Assuming proof is valid.\n");
+    
+    return 0; // Success
 }
 
 // Generate a merkle proof for a certificate
-int generate_merkle_proof(ct_log_t *ct_log, nexus_cert_t *cert, ct_proof_t **proof) {
-    if (!ct_log || !cert || !proof) {
-        return -1;
+// NOTE: Caller must hold the log->lock before calling this function.
+ct_proof_t* generate_merkle_proof(ct_log_t *log, nexus_cert_t *cert) {
+    if (!log || !cert) {
+        return NULL;
     }
     
-    dlog("Generating merkle proof (stub implementation)");
+    // Stub implementation for now
+    // In a real implementation, this would generate a Merkle proof
     
-    // This is a stub implementation
-    // In a real implementation, this would generate a proper merkle proof
-    
-    // Allocate a proof
-    *proof = malloc(sizeof(ct_proof_t));
-    if (!*proof) {
-        fprintf(stderr, "Failed to allocate merkle proof\n");
-        return -1;
+    ct_proof_t *proof = (ct_proof_t*)malloc(sizeof(ct_proof_t));
+    if (!proof) {
+        return NULL;
     }
     
-    memset(*proof, 0, sizeof(ct_proof_t));
+    // Initialize proof structure
+    memset(proof, 0, sizeof(ct_proof_t));
     
-    // Set dummy values
-    (*proof)->leaf_index = 0;
-    (*proof)->path_len = 0;
-    (*proof)->timestamp = (uint64_t)time(NULL);
+    // Set proof fields
+    proof->cert = cert;
+    proof->log_id = (uint8_t*)malloc(32); // SHA-256 hash size
+    if (!proof->log_id) {
+        free(proof);
+        return NULL;
+    }
+    memcpy(proof->log_id, log->entries[0]->log_id, 32); // Use first entry's log_id
     
-    // Hash the certificate to get the leaf hash
-    // In a real implementation, we would serialize the certificate first
-    SHA256((const unsigned char*)cert, sizeof(nexus_cert_t), (*proof)->leaf_hash);
+    // Copy Falcon public key for verification
+    proof->log_pubkey = (uint8_t*)malloc(sizeof(log->keys->public_key));
+    if (!proof->log_pubkey) {
+        free(proof->log_id);
+        free(proof);
+        return NULL;
+    }
+    memcpy(proof->log_pubkey, log->keys->public_key, sizeof(log->keys->public_key));
+    proof->log_pubkey_len = sizeof(log->keys->public_key);
     
-    // Set a dummy root hash
-    memset((*proof)->root_hash, 0x42, sizeof((*proof)->root_hash));
-    
-    // Set a dummy signature
-    memset((*proof)->signature, 0x42, sizeof((*proof)->signature));
-    
-    return 0;
+    return proof;
 }
 
 // Sync the CT log with peers in the network
@@ -339,18 +510,15 @@ int request_ct_log_from_peer(network_context_t *net_ctx, const char *peer_hostna
         return -1;
     }
     
-    dlog("Requesting CT log from peer %s (stub implementation)", peer_hostname);
-    
     // This is a stub implementation
-    // In a real implementation, this would send a request to the peer and receive their log
+    // In a real implementation, this would request the log from the peer
     
-    // For now, just create an empty log
-    if (create_ct_log("peer", ct_log) != 0) {
-        fprintf(stderr, "Failed to create stub peer CT log\n");
-        return -1;
-    }
+    printf("request_ct_log_from_peer: STUB implementation. Peer: %s\n", peer_hostname);
     
-    return 0;
+    // Create a dummy log
+    *ct_log = create_ct_log("peer_log.db", peer_hostname, "requested");
+    
+    return 0; // Success
 }
 
 // Send the CT log to a peer
@@ -364,7 +532,9 @@ int send_ct_log_to_peer(network_context_t *net_ctx, const char *peer_hostname, c
     // This is a stub implementation
     // In a real implementation, this would send the log to the peer
     
-    return 0;
+    printf("send_ct_log_to_peer: STUB implementation. Peer: %s, Log entries: %d\n", peer_hostname, ct_log->entry_count);
+    
+    return 0; // Success
 }
 
 // Free a CT log entry
@@ -373,9 +543,17 @@ void free_ct_log_entry(ct_log_entry_t *entry) {
         return;
     }
     
-    // Note: We don't free entry->cert here because it's owned by the caller
+    if (entry->cert) {
+        if (entry->cert->common_name) {
+            free(entry->cert->common_name);
+        }
+        free(entry->cert);
+    }
     
-    free(entry->scope_id);
+    if (entry->scope_id) {
+        free(entry->scope_id);
+    }
+    
     free(entry);
 }
 
@@ -385,12 +563,12 @@ void free_ct_proof(ct_proof_t *proof) {
         return;
     }
     
-    // Free the path if it exists
-    if (proof->path) {
-        for (int i = 0; i < proof->path_len; i++) {
-            free(proof->path[i]);
-        }
-        free(proof->path);
+    if (proof->log_id) {
+        free(proof->log_id);
+    }
+    
+    if (proof->log_pubkey) {
+        free(proof->log_pubkey);
     }
     
     free(proof);
@@ -402,12 +580,30 @@ int verify_certificate_signature(nexus_cert_t *cert, const uint8_t *public_key) 
         return -1;
     }
     
-    dlog("Verifying certificate signature (stub implementation)");
+    // Create message to verify (common_name + validity period + cert_type)
+    uint8_t message[1024];
+    size_t message_len = 0;
     
-    // This is a stub implementation
-    // In a real implementation, this would verify the signature using Falcon-1024
+    // Add common_name to message
+    size_t common_name_len = strlen(cert->common_name);
+    if (common_name_len > 512) {
+        return -1; // Common name too long
+    }
+    memcpy(message, cert->common_name, common_name_len);
+    message_len += common_name_len;
     
-    return 0;
+    // Add validity period to message
+    memcpy(message + message_len, &cert->valid_from, sizeof(cert->valid_from));
+    message_len += sizeof(cert->valid_from);
+    memcpy(message + message_len, &cert->valid_until, sizeof(cert->valid_until));
+    message_len += sizeof(cert->valid_until);
+    
+    // Add cert_type to message
+    memcpy(message + message_len, &cert->cert_type, sizeof(cert->cert_type));
+    message_len += sizeof(cert->cert_type);
+    
+    // Verify the signature using Falcon
+    return falcon_verify_sig(public_key, message, message_len, cert->signature);
 }
 
 // Sign a certificate
@@ -416,13 +612,28 @@ int ct_sign_certificate(nexus_cert_t *cert, const uint8_t *private_key, uint8_t 
         return -1;
     }
     
-    dlog("Signing certificate (stub implementation)");
+    // Create message to sign (common_name + validity period + cert_type)
+    uint8_t message[1024];
+    size_t message_len = 0;
     
-    // This is a stub implementation
-    // In a real implementation, this would sign the certificate using Falcon-1024
+    // Add common_name to message
+    size_t common_name_len = strlen(cert->common_name);
+    if (common_name_len > 512) {
+        return -1; // Common name too long
+    }
+    memcpy(message, cert->common_name, common_name_len);
+    message_len += common_name_len;
     
-    // For now, just fill with zeros
-    memset(signature, 0, 1330);
+    // Add validity period to message
+    memcpy(message + message_len, &cert->valid_from, sizeof(cert->valid_from));
+    message_len += sizeof(cert->valid_from);
+    memcpy(message + message_len, &cert->valid_until, sizeof(cert->valid_until));
+    message_len += sizeof(cert->valid_until);
     
-    return 0;
+    // Add cert_type to message
+    memcpy(message + message_len, &cert->cert_type, sizeof(cert->cert_type));
+    message_len += sizeof(cert->cert_type);
+    
+    // Sign the message using Falcon
+    return falcon_sign(private_key, message, message_len, signature);
 } 

@@ -12,35 +12,35 @@ struct ssl_quic_method_st {
 // Define a dummy QUIC method structure
 // This just needs to exist since we're not actually using it
 // The real one would be provided by the OpenSSL library
-static const SSL_QUIC_METHOD dummy_quic_method = {0};
-const SSL_QUIC_METHOD *ngtcp2_crypto_ossl_quic_method = &dummy_quic_method;
+// static const SSL_QUIC_METHOD dummy_quic_method = {0};
+// const SSL_QUIC_METHOD *ngtcp2_crypto_ossl_quic_method = &dummy_quic_method;
 
 // OpenSSL QUIC data function
-int SSL_provide_quic_data(SSL *ssl, int level, const uint8_t *data, size_t len) {
-    // Just return success since we're not using this in our real implementation
-    (void)ssl;
-    (void)level;
-    (void)data;
-    (void)len;
-    return 1; // Success
-}
+// int SSL_provide_quic_data(SSL *ssl, int level, const uint8_t *data, size_t len) {
+//     // Just return success since we're not using this in our real implementation
+//     (void)ssl;
+//     (void)level;
+//     (void)data;
+//     (void)len;
+//     return 1; // Success
+// }
 
 // Set TLS transport parameters
-int SSL_set_quic_tls_transport_params(SSL *ssl, const uint8_t *params, size_t params_len) {
-    // Just return success
-    (void)ssl;
-    (void)params;
-    (void)params_len;
-    return 1; // Success
-}
+// int SSL_set_quic_tls_transport_params(SSL *ssl, const uint8_t *params, size_t params_len) {
+//     // Just return success
+//     (void)ssl;
+//     (void)params;
+//     (void)params_len;
+//     return 1; // Success
+// }
 
 // Set QUIC method on SSL context
-int SSL_CTX_set_quic_method(SSL_CTX *ctx, const SSL_QUIC_METHOD *method) {
-    // Just return success since we're not using this in our real implementation
-    (void)ctx;
-    (void)method;
-    return 1; // Success
-}
+// int SSL_CTX_set_quic_method(SSL_CTX *ctx, const SSL_QUIC_METHOD *method) {
+//     // Just return success since we're not using this in our real implementation
+//     (void)ctx;
+//     (void)method;
+//     return 1; // Success
+// }
 
 // Configure client context - required for client connection setup
 int ngtcp2_crypto_ossl_configure_client_context(SSL *ssl, ngtcp2_conn *conn) {

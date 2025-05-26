@@ -1,10 +1,12 @@
 #include "test_packet_protocol.h"
-#include "packet_protocol.h"
-#include "debug.h"
+#include "../include/packet_protocol.h"
+#include "../include/dns_types.h"
+#include "../include/debug.h"
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h> // For malloc/free
+#include <time.h>   // For time()
 
 // Re-define test_case or include a common test helper header
 static void test_case(const char* name, int condition) {
@@ -138,6 +140,131 @@ static void test_tld_register_req_payload_serialization_deserialization(void) {
     }
 }
 
+static void test_dns_query_payload_serialization_deserialization(void) {
+    payload_dns_query_t original_payload, deserialized_payload;
+    uint8_t buffer[sizeof(payload_dns_query_t) + 50]; // Buffer with padding
+    ssize_t serialized_size, deserialized_size;
+    ssize_t expected_size;
+
+    printf("\nStarting DNS Query Payload Serialization/Deserialization Tests...\n");
+
+    // Test Case 1: Basic DNS Query
+    memset(&original_payload, 0, sizeof(payload_dns_query_t));
+    strncpy(original_payload.query_name, "test.example.com", sizeof(original_payload.query_name) - 1);
+    original_payload.type = DNS_RECORD_TYPE_AAAA;
+
+    expected_size = get_serialized_payload_dns_query_size(&original_payload);
+    serialized_size = serialize_payload_dns_query(&original_payload, buffer, sizeof(buffer));
+    test_case("payload_dns_query_t serialization size correct", serialized_size == expected_size && serialized_size > 0);
+
+    if (serialized_size > 0) {
+        memset(&deserialized_payload, 0, sizeof(payload_dns_query_t));
+        deserialized_size = deserialize_payload_dns_query(buffer, serialized_size, &deserialized_payload);
+        test_case("payload_dns_query_t deserialization size matches serialized", deserialized_size == serialized_size);
+        test_case("payload_dns_query_t query_name matches", strcmp(deserialized_payload.query_name, original_payload.query_name) == 0);
+        test_case("payload_dns_query_t type matches", deserialized_payload.type == original_payload.type);
+    }
+
+    // Test Case 2: Query name at max length
+    memset(&original_payload, 0, sizeof(payload_dns_query_t));
+    memset(original_payload.query_name, 'a', sizeof(original_payload.query_name) -1);
+    original_payload.query_name[sizeof(original_payload.query_name)-1] = '\0';
+    original_payload.type = DNS_RECORD_TYPE_A;
+
+    expected_size = get_serialized_payload_dns_query_size(&original_payload);
+    serialized_size = serialize_payload_dns_query(&original_payload, buffer, sizeof(buffer));
+    test_case("payload_dns_query_t (max name) serialization size correct", serialized_size == expected_size && serialized_size > 0);
+
+    if (serialized_size > 0) {
+        memset(&deserialized_payload, 0, sizeof(payload_dns_query_t));
+        deserialized_size = deserialize_payload_dns_query(buffer, serialized_size, &deserialized_payload);
+        test_case("payload_dns_query_t (max name) deserialization size matches serialized", deserialized_size == serialized_size);
+        test_case("payload_dns_query_t (max name) query_name matches", strcmp(deserialized_payload.query_name, original_payload.query_name) == 0);
+        test_case("payload_dns_query_t (max name) type matches", deserialized_payload.type == original_payload.type);
+    }
+}
+
+static void test_dns_response_payload_serialization_deserialization(void) {
+    payload_dns_response_t original_payload, deserialized_payload;
+    uint8_t buffer[1024]; // Buffer for response, might need to be larger for many records
+    ssize_t serialized_size, deserialized_size;
+    ssize_t expected_size;
+
+    printf("\nStarting DNS Response Payload Serialization/Deserialization Tests...\n");
+
+    // Test Case 1: Success with one AAAA record
+    memset(&original_payload, 0, sizeof(payload_dns_response_t));
+    original_payload.status = DNS_STATUS_SUCCESS;
+    original_payload.record_count = 1;
+    original_payload.records = malloc(sizeof(dns_record_t));
+    assert(original_payload.records != NULL);
+    original_payload.records[0].name = strdup("test.example.com");
+    original_payload.records[0].type = DNS_RECORD_TYPE_AAAA;
+    original_payload.records[0].ttl = 3600;
+    original_payload.records[0].rdata = strdup("2001:db8::1");
+    original_payload.records[0].last_updated = time(NULL);
+    assert(original_payload.records[0].name != NULL && original_payload.records[0].rdata != NULL);
+
+    expected_size = get_serialized_payload_dns_response_size(&original_payload);
+    serialized_size = serialize_payload_dns_response(&original_payload, buffer, sizeof(buffer));
+    printf("DNS Response Test Case 1: expected_size = %zd, serialized_size = %zd\n", expected_size, serialized_size);
+    test_case("payload_dns_response_t (1 AAAA record) serialization size correct", serialized_size == expected_size && serialized_size > 0);
+
+    if (serialized_size > 0) {
+        memset(&deserialized_payload, 0, sizeof(payload_dns_response_t));
+        deserialized_size = deserialize_payload_dns_response(buffer, serialized_size, &deserialized_payload);
+        test_case("payload_dns_response_t (1 AAAA record) deserialization size matches serialized", deserialized_size == serialized_size);
+        test_case("payload_dns_response_t (1 AAAA record) status matches", deserialized_payload.status == original_payload.status);
+        test_case("payload_dns_response_t (1 AAAA record) record_count matches", deserialized_payload.record_count == original_payload.record_count);
+        if (deserialized_payload.record_count == 1 && deserialized_payload.records) {
+            test_case("payload_dns_response_t (1 AAAA record) record name matches", strcmp(deserialized_payload.records[0].name, original_payload.records[0].name) == 0);
+            test_case("payload_dns_response_t (1 AAAA record) record type matches", deserialized_payload.records[0].type == original_payload.records[0].type);
+            test_case("payload_dns_response_t (1 AAAA record) record ttl matches", deserialized_payload.records[0].ttl == original_payload.records[0].ttl);
+            test_case("payload_dns_response_t (1 AAAA record) record rdata matches", strcmp(deserialized_payload.records[0].rdata, original_payload.records[0].rdata) == 0);
+            // last_updated might differ slightly if serialization/deserialization adds any delay and a new time(NULL) is used.
+            // For this test, we assume they are close enough or the test needs to account for it.
+            // Or better, the deserialized record should preserve the original timestamp.
+            test_case("payload_dns_response_t (1 AAAA record) record last_updated matches", deserialized_payload.records[0].last_updated == original_payload.records[0].last_updated);
+        }
+        // Cleanup deserialized payload records
+        if (deserialized_payload.records) {
+            for (int i = 0; i < deserialized_payload.record_count; ++i) {
+                free(deserialized_payload.records[i].name);
+                free(deserialized_payload.records[i].rdata);
+            }
+            free(deserialized_payload.records);
+        }
+    }
+    // Cleanup original payload records
+    free(original_payload.records[0].name);
+    free(original_payload.records[0].rdata);
+    free(original_payload.records);
+
+    // Test Case 2: NXDOMAIN response (no records)
+    memset(&original_payload, 0, sizeof(payload_dns_response_t));
+    original_payload.status = DNS_STATUS_NXDOMAIN;
+    original_payload.record_count = 0;
+    original_payload.records = NULL;
+
+    expected_size = get_serialized_payload_dns_response_size(&original_payload);
+    serialized_size = serialize_payload_dns_response(&original_payload, buffer, sizeof(buffer));
+    printf("DNS Response Test Case 2 (NXDOMAIN): expected_size = %zd, serialized_size = %zd\n", expected_size, serialized_size);
+    test_case("payload_dns_response_t (NXDOMAIN) serialization size correct", serialized_size == expected_size && serialized_size > 0);
+
+    if (serialized_size > 0) {
+        memset(&deserialized_payload, 0, sizeof(payload_dns_response_t));
+        deserialized_size = deserialize_payload_dns_response(buffer, serialized_size, &deserialized_payload);
+        test_case("payload_dns_response_t (NXDOMAIN) deserialization size matches serialized", deserialized_size == serialized_size);
+        test_case("payload_dns_response_t (NXDOMAIN) status matches", deserialized_payload.status == original_payload.status);
+        test_case("payload_dns_response_t (NXDOMAIN) record_count is 0", deserialized_payload.record_count == 0);
+        test_case("payload_dns_response_t (NXDOMAIN) records is NULL", deserialized_payload.records == NULL);
+        // No records to cleanup in deserialized_payload for NXDOMAIN
+    }
+    // No records to cleanup in original_payload for NXDOMAIN
+
+    // TODO: Add test case for multiple records of different types if supported by dns_record_t serialization
+}
+
 // TODO: Add tests for other payload types
 // - test_tld_register_resp_payload_s10n_d10n
 // - test_dns_record_s10n_d10n (this one is complex)
@@ -146,6 +273,8 @@ void ts_packet_protocol_init(void) {
     printf("Initializing Packet Protocol Tests...\\n");
     test_nexus_packet_serialization_deserialization();
     test_tld_register_req_payload_serialization_deserialization();
+    test_dns_query_payload_serialization_deserialization();
+    test_dns_response_payload_serialization_deserialization();
     // Call other test functions here
     printf("Packet Protocol Tests Finished.\\n");
 } 

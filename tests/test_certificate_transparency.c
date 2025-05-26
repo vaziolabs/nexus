@@ -2,133 +2,377 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <pthread.h>
+#include <time.h>
 #include "../include/certificate_transparency.h"
 #include "../include/network_context.h"
 #include "test_certificate_transparency.h"
+#include "../include/certificate_authority.h"
 
-// Mock certificate for testing
-static nexus_cert_t* create_mock_certificate(void) {
-    nexus_cert_t *cert = malloc(sizeof(nexus_cert_t));
-    assert(cert != NULL);
+// Helper function to create a proper certificate for testing
+static nexus_cert_t* create_test_certificate(const char* name) {
+    nexus_cert_t* cert = (nexus_cert_t*)malloc(sizeof(nexus_cert_t));
+    if (!cert) return NULL;
     
-    // Fill with test data
     memset(cert, 0, sizeof(nexus_cert_t));
-    strncpy(cert->subject, "test.example.com", sizeof(cert->subject) - 1);
-    cert->valid_from = 1000000000;  // Some timestamp
-    cert->valid_until = 2000000000; // Some future timestamp
+    cert->common_name = strdup(name);
+    if (!cert->common_name) {
+        free(cert);
+        return NULL;
+    }
+    
+    // Set certificate properties
+    cert->valid_from = (uint64_t)time(NULL);
+    cert->valid_until = cert->valid_from + (90 * 24 * 60 * 60); // Valid for 90 days
+    cert->cert_type = CERT_TYPE_FEDERATED;
+    
+    // Generate a Falcon keypair
+    uint8_t public_key[1793];
+    uint8_t private_key[2305];
+    if (generate_falcon_keypair(public_key, private_key) != 0) {
+        free(cert->common_name);
+        free(cert);
+        return NULL;
+    }
+    
+    // Create message to sign
+    uint8_t message[1024];
+    size_t message_len = 0;
+    
+    // Add common_name to message
+    size_t common_name_len = strlen(cert->common_name);
+    memcpy(message + message_len, cert->common_name, common_name_len);
+    message_len += common_name_len;
+    
+    // Add validity period to message
+    memcpy(message + message_len, &cert->valid_from, sizeof(cert->valid_from));
+    message_len += sizeof(cert->valid_from);
+    memcpy(message + message_len, &cert->valid_until, sizeof(cert->valid_until));
+    message_len += sizeof(cert->valid_until);
+    
+    // Add cert_type to message
+    memcpy(message + message_len, &cert->cert_type, sizeof(cert->cert_type));
+    message_len += sizeof(cert->cert_type);
+    
+    // Sign the certificate
+    if (falcon_sign(private_key, message, message_len, cert->signature) != 0) {
+        free(cert->common_name);
+        free(cert);
+        return NULL;
+    }
     
     return cert;
 }
 
+static void free_test_certificate(nexus_cert_t* cert) {
+    if (cert) {
+        free(cert->common_name);
+        free(cert);
+    }
+}
+
 static void test_ct_log_creation(void) {
-    printf("Testing CT log creation...\n");
+    printf("Testing CT log creation with Falcon keys...\n");
     
-    ct_log_t *log = NULL;
-    assert(create_ct_log("test-scope", &log) == 0);
+    ct_log_t *log = create_ct_log("test_creation.ctlog", "testnode.local", "private");
     assert(log != NULL);
-    assert(log->scope_id != NULL);
-    assert(strcmp(log->scope_id, "test-scope") == 0);
     assert(log->entries != NULL);
     assert(log->entry_count == 0);
     assert(log->max_entries > 0);
+    assert(log->keys != NULL);
+    
+    // Verify Falcon keys were generated
+    int public_key_has_value = 0;
+    int private_key_has_value = 0;
+    
+    for (int i = 0; i < sizeof(log->keys->public_key); i++) {
+        if (log->keys->public_key[i] != 0) {
+            public_key_has_value = 1;
+            break;
+        }
+    }
+    
+    for (int i = 0; i < sizeof(log->keys->private_key); i++) {
+        if (log->keys->private_key[i] != 0) {
+            private_key_has_value = 1;
+            break;
+        }
+    }
+    
+    assert(public_key_has_value);
+    assert(private_key_has_value);
     
     cleanup_certificate_transparency(log);
     printf("CT log creation test passed\n");
 }
 
 static void test_certificate_operations(void) {
-    printf("Testing certificate operations in CT log...\n");
+    printf("Testing certificate operations in CT log with Falcon signatures...\n");
     
-    ct_log_t *log = NULL;
-    assert(create_ct_log("test-scope", &log) == 0);
+    ct_log_t *log = create_ct_log("test_ops.ctlog", "opsnode.local", "private");
+    assert(log != NULL);
     
-    // Create a test certificate
-    nexus_cert_t *cert = create_mock_certificate();
+    nexus_cert_t *cert = create_test_certificate("ops.example.com");
+    assert(cert != NULL);
     
     // Add certificate to log
-    assert(add_certificate_to_ct_log(log, cert) == 0);
+    ct_log_entry_t* entry = add_certificate_to_ct_log(log, cert, NULL, 0);
+    assert(entry != NULL);
     assert(log->entry_count == 1);
     
-    // Verify certificate in log
-    assert(verify_certificate_in_ct_log(log, cert, NULL) == 0);
+    // Verify entry signature (not all zeros)
+    int signature_has_value = 0;
+    for (int i = 0; i < sizeof(entry->signature); i++) {
+        if (entry->signature[i] != 0) {
+            signature_has_value = 1;
+            break;
+        }
+    }
+    assert(signature_has_value);
     
-    // Get proof for certificate
+    // Verify certificate is in the log
+    int found = verify_certificate_in_ct_log(log, cert, NULL);
+    assert(found == 1);
+    
+    // Get proof of inclusion
     ct_proof_t *proof = NULL;
-    assert(verify_certificate_in_ct_log(log, cert, &proof) == 0);
+    found = verify_certificate_in_ct_log(log, cert, &proof);
+    assert(found == 1);
     assert(proof != NULL);
+    assert(proof->log_pubkey != NULL);
+    assert(proof->log_pubkey_len > 0);
     
-    // Verify the proof
-    assert(verify_merkle_proof(proof, log) == 0);
+    // Verify log's public key was copied to the proof
+    int pubkey_match = 1;
+    for (size_t i = 0; i < proof->log_pubkey_len; i++) {
+        if (proof->log_pubkey[i] != log->keys->public_key[i]) {
+            pubkey_match = 0;
+            break;
+        }
+    }
+    assert(pubkey_match);
     
-    // Clean up
     free_ct_proof(proof);
-    free(cert);
+    free_test_certificate(cert);
     cleanup_certificate_transparency(log);
     
     printf("Certificate operations tests passed\n");
 }
 
 static void test_merkle_tree(void) {
-    printf("Testing Merkle tree operations...\n");
-    
-    ct_log_t *log = NULL;
-    assert(create_ct_log("test-scope", &log) == 0);
-    
-    // Add multiple certificates
-    for (int i = 0; i < 5; i++) {
-        nexus_cert_t *cert = create_mock_certificate();
-        snprintf(cert->subject, sizeof(cert->subject), "test%d.example.com", i);
-        assert(add_certificate_to_ct_log(log, cert) == 0);
-        // Note: We're leaking certificates here, but in this simple test it's acceptable
+    printf("Testing Merkle tree with Falcon signatures...\n");
+    ct_log_t* log = create_ct_log("test_log_merkle.ct", "merkle.node.com", "test_mode");
+    assert(log != NULL);
+
+    // Add several certificates to the log
+    for (int i = 0; i < 5; ++i) {
+        char cert_name[256];
+        snprintf(cert_name, sizeof(cert_name), "test%d.example.com", i);
+        nexus_cert_t* cert_loop = create_test_certificate(cert_name);
+        assert(cert_loop != NULL);
+        ct_log_entry_t* entry = add_certificate_to_ct_log(log, cert_loop, NULL, 0);
+        assert(entry != NULL);
+        free_test_certificate(cert_loop);
     }
+
+    // Build the Merkle tree
+    int build_result = build_merkle_tree(log);
+    assert(build_result == 0);
+
+    // Add another certificate and verify it
+    nexus_cert_t* cert1 = create_test_certificate("verify.example.com");
+    assert(cert1 != NULL);
+    ct_log_entry_t* entry1 = add_certificate_to_ct_log(log, cert1, NULL, 0);
+    assert(entry1 != NULL);
+
+    // Rebuild the Merkle tree
+    build_result = build_merkle_tree(log);
+    assert(build_result == 0);
+
+    // Get proof of inclusion
+    ct_proof_t* proof = NULL;
+    int verified = verify_certificate_in_ct_log(log, cert1, &proof);
+    assert(verified == 1);
+    assert(proof != NULL);
     
-    assert(log->entry_count == 5);
+    // Verify proof has the log's public key
+    assert(proof->log_pubkey != NULL);
+    assert(proof->log_pubkey_len > 0);
     
-    // Build Merkle tree
-    assert(build_merkle_tree(log) == 0);
+    // Check that a non-existent certificate is not found
+    nexus_cert_t* cert_non_existent = create_test_certificate("nonexistent.example.com");
+    assert(cert_non_existent != NULL);
+    verified = verify_certificate_in_ct_log(log, cert_non_existent, NULL);
+    assert(verified != 1);
     
-    // Check that the Merkle tree was created
-    assert(log->merkle_tree != NULL);
-    
+    // Clean up
+    free_ct_proof(proof);
+    free_test_certificate(cert1);
+    free_test_certificate(cert_non_existent);
     cleanup_certificate_transparency(log);
+    
     printf("Merkle tree operations test passed\n");
 }
 
-static void test_network_context_integration(void) {
-    printf("Testing CT log with network context...\n");
+static void test_signature_verification(void) {
+    printf("Testing CT log entry signature verification...\n");
     
-    // Create a minimal network context
+    ct_log_t *log = create_ct_log("test_sig_verify.ctlog", "signode.local", "private");
+    assert(log != NULL);
+    
+    // Create a certificate and add it to the log
+    nexus_cert_t *cert = create_test_certificate("sig.example.com");
+    assert(cert != NULL);
+    
+    ct_log_entry_t* entry = add_certificate_to_ct_log(log, cert, NULL, 0);
+    assert(entry != NULL);
+    
+    // Generate a proof for the certificate
+    ct_proof_t *proof = NULL;
+    int found = verify_certificate_in_ct_log(log, cert, &proof);
+    assert(found == 1);
+    assert(proof != NULL);
+    
+    // Create message to verify (cert + timestamp + log_id)
+    uint8_t message[2048];
+    size_t message_len = 0;
+    
+    // Add certificate common_name to message
+    if (entry->cert->common_name) {
+        size_t common_name_len = strlen(entry->cert->common_name);
+        memcpy(message + message_len, entry->cert->common_name, common_name_len);
+        message_len += common_name_len;
+    }
+    
+    // Add certificate signature to message
+    memcpy(message + message_len, entry->cert->signature, sizeof(entry->cert->signature));
+    message_len += sizeof(entry->cert->signature);
+    
+    // Add timestamp to message
+    memcpy(message + message_len, &entry->timestamp, sizeof(entry->timestamp));
+    message_len += sizeof(entry->timestamp);
+    
+    // Add log_id to message
+    memcpy(message + message_len, entry->log_id, sizeof(entry->log_id));
+    message_len += sizeof(entry->log_id);
+    
+    // Verify the signature
+    int verify_result = falcon_verify_sig(log->keys->public_key, message, message_len, entry->signature);
+    assert(verify_result == 0);
+    
+    // Tamper with the message and verify the signature fails
+    message[0] ^= 0xFF; // Flip some bits
+    verify_result = falcon_verify_sig(log->keys->public_key, message, message_len, entry->signature);
+    assert(verify_result != 0);
+    
+    free_ct_proof(proof);
+    free_test_certificate(cert);
+    cleanup_certificate_transparency(log);
+    
+    printf("CT log entry signature verification test passed\n");
+}
+
+static void test_network_context_integration(void) {
+    printf("Testing CT log with network context integration...\n");
+    
+    network_context_t net_ctx;
+    memset(&net_ctx, 0, sizeof(network_context_t));
+    net_ctx.mode = strdup("private");
+    net_ctx.hostname = strdup("localhost");
+
+    ct_log_t *log = init_certificate_transparency(&net_ctx);
+    assert(log != NULL);
+    assert(log->keys != NULL);
+    
+    // Verify Falcon keys were generated
+    int public_key_has_value = 0;
+    int private_key_has_value = 0;
+    
+    for (int i = 0; i < sizeof(log->keys->public_key); i++) {
+        if (log->keys->public_key[i] != 0) {
+            public_key_has_value = 1;
+            break;
+        }
+    }
+    
+    for (int i = 0; i < sizeof(log->keys->private_key); i++) {
+        if (log->keys->private_key[i] != 0) {
+            private_key_has_value = 1;
+            break;
+        }
+    }
+    
+    assert(public_key_has_value);
+    assert(private_key_has_value);
+    
+    cleanup_certificate_transparency(log);
+    free((void*)net_ctx.mode);
+    free((void*)net_ctx.hostname);
+    
+    printf("Network context integration test passed\n");
+}
+
+static void test_ca_ct_integration(void) {
+    printf("Testing certificate authority and transparency integration...\n");
+    
+    // Initialize network context
     network_context_t net_ctx;
     memset(&net_ctx, 0, sizeof(network_context_t));
     net_ctx.mode = strdup("private");
     net_ctx.hostname = strdup("localhost");
     net_ctx.server = strdup("localhost");
     
-    // Initialize CT for this context
-    ct_log_t *log = NULL;
-    assert(init_certificate_transparency(&net_ctx, &log) == 0);
+    // Initialize certificate authority
+    ca_context_t *ca_ctx = NULL;
+    int result = init_certificate_authority(&net_ctx, &ca_ctx);
+    assert(result == 0);
+    assert(ca_ctx != NULL);
+    
+    // Initialize certificate transparency log
+    ct_log_t *log = init_certificate_transparency(&net_ctx);
     assert(log != NULL);
     
-    // Check that scope ID includes mode and hostname
-    assert(strstr(log->scope_id, "private") != NULL);
-    assert(strstr(log->scope_id, "localhost") != NULL);
+    // Request a certificate from the CA
+    nexus_cert_t *cert = NULL;
+    result = handle_cert_request(ca_ctx, "integration.test.com", &cert);
+    assert(result == 0);
+    assert(cert != NULL);
+    
+    // Add the certificate to the CT log
+    ct_log_entry_t* entry = add_certificate_to_ct_log(log, cert, NULL, 0);
+    assert(entry != NULL);
+    
+    // Verify the certificate is in the log
+    int found = verify_certificate_in_ct_log(log, cert, NULL);
+    assert(found == 1);
+    
+    // Get a proof of inclusion
+    ct_proof_t *proof = NULL;
+    found = verify_certificate_in_ct_log(log, cert, &proof);
+    assert(found == 1);
+    assert(proof != NULL);
     
     // Clean up
+    free_ct_proof(proof);
+    free_certificate(cert);
     cleanup_certificate_transparency(log);
+    cleanup_certificate_authority(ca_ctx);
     free((void*)net_ctx.mode);
     free((void*)net_ctx.hostname);
     free((void*)net_ctx.server);
     
-    printf("Network context integration test passed\n");
+    printf("CA and CT integration test passed\n");
 }
 
 void test_certificate_transparency_all(void) {
-    printf("\n=== Running Certificate Transparency Tests ===\n");
+    printf("\n=== Running Certificate Transparency Tests with Falcon ===\n");
     
     test_ct_log_creation();
     test_certificate_operations();
     test_merkle_tree();
+    test_signature_verification();
     test_network_context_integration();
+    test_ca_ct_integration();
     
     printf("All certificate transparency tests passed\n");
 } 

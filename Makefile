@@ -6,13 +6,19 @@ PKG_NAME_NGTCP2 := $(shell command -v pkgconf >/dev/null 2>&1 && echo "libngtcp2
 
 # Compiler and flags
 CC := gcc
-CFLAGS := -Wall -Wextra -g -O2 -D_GNU_SOURCE -I. -I./include -I./include/extern/libngtcp2/lib/includes -I./include/extern/libngtcp2/crypto/includes $(shell $(PKG_CONFIG) --cflags $(PKG_NAME_NGTCP2)) -DNGTCP2_ENABLE_STREAM_API
+CFLAGS := -Wall -Wextra -g -O2 -D_GNU_SOURCE -I. -I./include -I./include/extern/libngtcp2/lib/includes -I./include/extern/libngtcp2/crypto/includes -I./include/extern/falcon $(shell $(PKG_CONFIG) --cflags $(PKG_NAME_NGTCP2)) -DNGTCP2_ENABLE_STREAM_API
 
 # Store pkg-config output for libs separately
 PKG_CONFIG_LIBS := $(shell $(PKG_CONFIG) --libs $(PKG_NAME_NGTCP2))
 
 # Libraries: ensure -lngtcp2 is present and other system libs
 LIBS := $(PKG_CONFIG_LIBS) -lpthread -lssl -lcrypto -lrt -lngtcp2_crypto_ossl -luuid
+
+# Add Falcon source files
+FALCON_SRCS := include/extern/falcon/falcon.c include/extern/falcon/shake.c include/extern/falcon/codec.c include/extern/falcon/common.c \
+               include/extern/falcon/fft.c include/extern/falcon/fpr.c include/extern/falcon/keygen.c include/extern/falcon/rng.c \
+               include/extern/falcon/sign.c include/extern/falcon/vrfy.c
+FALCON_OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(FALCON_SRCS))
 
 # Linker flags (LDFLAGS is often used for -L paths if needed, but LIBS handles -l flags)
 LDFLAGS :=
@@ -72,7 +78,7 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 # Link the program
 $(TARGET): $(BUILD_DIR) $(BUILD_DIR)/main.o $(COMMON_OBJS)
 	@echo "Linking $(TARGET)..."
-	@$(CC) $(LDFLAGS) $(BUILD_DIR)/main.o $(COMMON_OBJS) $(LIBS) -o $(TARGET)
+	@$(CC) $(LDFLAGS) $(BUILD_DIR)/main.o $(COMMON_OBJS) include/extern/falcon/*.c $(LIBS) -o $(TARGET)
 	@echo "Build successful!"
 	@echo "Binary location: $(TARGET)"
 	@echo "Usage example: $(TARGET) --mode private --hostname localhost --server localhost"
@@ -81,7 +87,7 @@ $(TARGET): $(BUILD_DIR) $(BUILD_DIR)/main.o $(COMMON_OBJS)
 # Link the CLI program
 $(CLI_TARGET): $(BUILD_DIR) $(BUILD_DIR)/nexus_cli.o $(COMMON_OBJS)
 	@echo "Linking $(CLI_TARGET)..."
-	@$(CC) $(LDFLAGS) $(BUILD_DIR)/nexus_cli.o $(COMMON_OBJS) $(LIBS) -o $(CLI_TARGET)
+	@$(CC) $(LDFLAGS) $(BUILD_DIR)/nexus_cli.o $(COMMON_OBJS) include/extern/falcon/*.c $(LIBS) -o $(CLI_TARGET)
 	@echo "CLI build successful!"
 	@echo "Binary location: $(CLI_TARGET)"
 	@echo "Usage example: $(CLI_TARGET) help"
@@ -154,26 +160,54 @@ help:
 .PRECIOUS: $(BUILD_DIR)/%.o
 
 # --- Test Target --- 
-# Rule to compile test files from tests/ directory
+
+# Test source files and objects
+# Moved these definitions before their first use in $(TEST_TARGET)
+# Filter out standalone test files from the main test suite sources
+ALL_TEST_CSRCS := $(wildcard $(TESTS_DIR)/*.c)
+STANDALONE_TEST_CSRCS := $(TESTS_DIR)/test_quic_handshake.c $(TESTS_DIR)/test_ipv6_quic_handshake.c
+TEST_SUITE_CSRCS := $(filter-out $(STANDALONE_TEST_CSRCS), $(ALL_TEST_CSRCS))
+
+TEST_SUITE_OBJS := $(TEST_SUITE_CSRCS:$(TESTS_DIR)/%.c=$(BUILD_DIR)/%.o)
+
+# Objects for specific standalone tests will be handled by their own rules
+# e.g. $(BUILD_DIR)/test_quic_handshake.o and $(BUILD_DIR)/test_ipv6_quic_handshake.o
+
+# Use the common objects for the source files needed in tests (COMMON_OBJS is defined much earlier)
+SRC_OBJS_FOR_TESTS := $(COMMON_OBJS)
+
+# This variable seems unused, but keeping its definition here with other test vars.
+# TEST_SRCS := $(wildcard $(TESTS_DIR)/*.c) $(wildcard $(SRC_DIR)/*.c) # This was too broad
+
+# Rule to compile test files from tests/ directory (applies to all test .c files)
 $(BUILD_DIR)/%.o: $(TESTS_DIR)/%.c
 	@echo "Compiling test file $<..."
 	@$(CC) $(CFLAGS) -I./$(INCLUDE_DIR) -c $< -o $@
 
-# Link the test executable
-$(TEST_TARGET): $(BUILD_DIR) $(SRC_OBJS_FOR_TESTS) $(TEST_FILES_OBJS)
+# Rule to compile Falcon source files
+$(BUILD_DIR)/include/extern/falcon/%.o: include/extern/falcon/%.c
+	@mkdir -p $(dir $@)
+	@echo "Compiling Falcon file $<..."
+	@$(CC) $(CFLAGS) -c $< -o $@
+	
+# Link the test executable (nexus_tests)
+# Use TEST_SUITE_OBJS instead of the overly broad TEST_FILES_OBJS
+$(TEST_TARGET): $(BUILD_DIR) $(SRC_OBJS_FOR_TESTS) $(TEST_SUITE_OBJS)
 	@echo "Linking $(TEST_TARGET)..."
-	@$(CC) $(LDFLAGS) $(SRC_OBJS_FOR_TESTS) $(TEST_FILES_OBJS) $(LIBS) -o $(TEST_TARGET)
+	@$(CC) $(LDFLAGS) $(SRC_OBJS_FOR_TESTS) $(TEST_SUITE_OBJS) include/extern/falcon/*.c $(LIBS) -o $(TEST_TARGET)
 	@echo "Test build successful!"
 	@echo "Test binary location: $(TEST_TARGET)"
 
 # Link the handshake test executable
+# It correctly uses its own .o file and common app objects
 $(HANDSHAKE_TEST_TARGET): $(BUILD_DIR) $(BUILD_DIR)/test_quic_handshake.o $(SRC_OBJS_FOR_TESTS)
 	@echo "Linking $(HANDSHAKE_TEST_TARGET)..."
-	@$(CC) $(LDFLAGS) $(BUILD_DIR)/test_quic_handshake.o $(SRC_OBJS_FOR_TESTS) $(LIBS) -o $(HANDSHAKE_TEST_TARGET)
+	@$(CC) $(LDFLAGS) $(BUILD_DIR)/test_quic_handshake.o $(SRC_OBJS_FOR_TESTS) include/extern/falcon/*.c $(LIBS) -o $(HANDSHAKE_TEST_TARGET)
 	@echo "Handshake test build successful!"
 	@echo "Test binary location: $(HANDSHAKE_TEST_TARGET)"
 
 # Link the IPv6 handshake test executable
+# It correctly uses its own .o file and common app objects
 $(IPV6_HANDSHAKE_TEST_TARGET): $(BUILD_DIR) $(BUILD_DIR)/test_ipv6_quic_handshake.o $(SRC_OBJS_FOR_TESTS)
 	@echo "Linking $(IPV6_HANDSHAKE_TEST_TARGET)..."
 	@$(CC) $(LDFLAGS) $(BUILD_DIR)/test_ipv6_quic_handshake.o $(SRC_OBJS_FOR_TESTS) $(LIBS) -o $(IPV6_HANDSHAKE_TEST_TARGET)
@@ -212,25 +246,27 @@ test_cli: $(TEST_TARGET)
 	@echo "Running CLI Interface tests only..."
 	@./$(TEST_TARGET) cli
 
-test_ct: $(TEST_TARGET)
+# Run Certificate Transparency tests only
+test_ct: $(BUILD_DIR)
+	@echo "Compiling standalone CT test..."
+	@$(CC) $(CFLAGS) -o $(BUILD_DIR)/test_ct tests/standalone_ct_test.c src/certificate_transparency.c \
+		src/certificate_authority.c src/system.c src/network_context.c src/debug.c \
+		src/tld_manager.c src/utils.c include/extern/falcon/*.c $(LIBS)
 	@echo "Running Certificate Transparency tests only..."
-	@./$(TEST_TARGET) ct
+	@./$(BUILD_DIR)/test_ct
 
-test_ca: $(TEST_TARGET)
+# Run Certificate Authority tests only
+test_ca: $(BUILD_DIR)
+	@echo "Compiling standalone CA test..."
+	@$(CC) $(CFLAGS) -o $(BUILD_DIR)/test_ca tests/standalone_ca_test.c src/certificate_authority.c \
+		src/system.c src/network_context.c src/debug.c src/tld_manager.c src/utils.c \
+		include/extern/falcon/*.c $(LIBS)
 	@echo "Running Certificate Authority tests only..."
-	@./$(TEST_TARGET) ca
+	@./$(BUILD_DIR)/test_ca
 
 test_network: $(TEST_TARGET)
 	@echo "Running Network Context tests only..."
 	@./$(TEST_TARGET) network
-
-# Test source files and objects
-TEST_SRCS := $(wildcard $(TESTS_DIR)/*.c) $(wildcard $(SRC_DIR)/*.c)
-# Objects from the tests directory
-TEST_FILES_SRCS = $(wildcard $(TESTS_DIR)/*.c)
-TEST_FILES_OBJS = $(TEST_FILES_SRCS:$(TESTS_DIR)/%.c=$(BUILD_DIR)/%.o)
-# Use the common objects for the source files needed in tests
-SRC_OBJS_FOR_TESTS := $(COMMON_OBJS)
 
 # Integration test target
 integration_test: all

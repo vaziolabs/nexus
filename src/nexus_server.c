@@ -1,10 +1,12 @@
-#include "nexus_server.h"
-#include "network_context.h"
-#include "certificate_authority.h"
-#include "debug.h"
-#include "system.h"
-#include "packet_protocol.h" // For serialization/deserialization
-#include "tld_manager.h"     // For TLD management functions
+#include "../include/nexus_server.h"
+#include "../include/network_context.h"
+#include "../include/certificate_authority.h"
+#include "../include/debug.h"
+#include "../include/system.h"
+#include "../include/packet_protocol.h" // For serialization/deserialization
+#include "../include/dns_types.h"       // For DNS specific types like dns_response_status_t
+#include "../include/tld_manager.h"     // For TLD management functions
+#include "../include/ngtcp2_compat.h"   // For ngtcp2 compatibility, should include ngtcp2.h
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/rand.h>
@@ -14,6 +16,9 @@
 #include <fcntl.h>
 #include <pthread.h> // For pthread_mutex
 #include <ngtcp2/ngtcp2_crypto.h>
+#include <ngtcp2/ngtcp2.h> // Explicitly include for ngtcp2_conn_get_ts
+#include <string.h> // For memset, strncpy, strcmp, strdup
+#include <stdlib.h> // For malloc, free, realloc
 
 // Define TLD registration response status codes (missing from included headers)
 #define TLD_REG_RESP_SUCCESS 0
@@ -38,10 +43,10 @@ static int on_stream_open(ngtcp2_conn *conn, int64_t stream_id, void *user_data)
 }
 
 static int on_stream_data(ngtcp2_conn *conn, uint32_t flags, int64_t stream_id,
-                         uint64_t offset, const uint8_t *data, 
+                         uint64_t offset_stream_data, const uint8_t *data,
                          size_t datalen, void *user_data, void *stream_user_data) {
     (void)flags;
-    (void)offset;
+    (void)offset_stream_data; // This offset is for the stream itself, not our buffer parsing.
     (void)stream_user_data;
 
     dlog("Server: Received %zu bytes on stream %ld", datalen, stream_id);
@@ -69,89 +74,192 @@ static int on_stream_data(ngtcp2_conn *conn, uint32_t flags, int64_t stream_id,
 
     dlog("Server: Deserialized packet type %d, data_len %u", received_packet.type, received_packet.data_len);
 
+    nexus_packet_t response_packet; // To store any response we might send
+    memset(&response_packet, 0, sizeof(nexus_packet_t));
+    response_packet.version = received_packet.version; // Echo version
+    response_packet.session_id = received_packet.session_id; // Echo session ID
+
+    uint8_t response_payload_buf[1024]; // Max estimated size for response payload
+    ssize_t response_payload_len = 0;
+
     switch (received_packet.type) {
         case PACKET_TYPE_TLD_REGISTER_REQ: {
-            dlog("Server: Handling TLD_REGISTER_REQ");
+            dlog("Server: Received TLD_REGISTER_REQ");
             payload_tld_register_req_t req_payload;
-            payload_tld_register_resp_t resp_payload;
-            memset(&req_payload, 0, sizeof(req_payload));
-            memset(&resp_payload, 0, sizeof(resp_payload));
-
             if (deserialize_payload_tld_register_req(received_packet.data, received_packet.data_len, &req_payload) < 0) {
                 dlog("ERROR: Server: Failed to deserialize TLD_REGISTER_REQ payload.");
-                strncpy(resp_payload.message, "Malformed request payload", sizeof(resp_payload.message) - 1);
-                resp_payload.status = TLD_REG_RESP_ERROR_INTERNAL_SERVER_ERROR; // Or a more specific parse error
+                break; // Out of switch case, will free received_packet.data later
+            }
+
+            response_packet.type = PACKET_TYPE_TLD_REGISTER_RESP;
+            payload_tld_register_resp_t resp_payload;
+            memset(&resp_payload, 0, sizeof(resp_payload));
+
+            tld_t* existing_tld = find_tld_by_name(server_config->net_ctx->tld_manager, req_payload.tld_name);
+            if (existing_tld) {
+                resp_payload.status = TLD_REG_RESP_ERROR_ALREADY_EXISTS;
+                strncpy(resp_payload.message, "TLD already exists.", sizeof(resp_payload.message) - 1);
             } else {
-                dlog("Server: Attempting to register TLD: %s", req_payload.tld_name);
                 tld_t* new_tld = register_new_tld(server_config->net_ctx->tld_manager, req_payload.tld_name);
                 if (new_tld) {
                     resp_payload.status = TLD_REG_RESP_SUCCESS;
-                    snprintf(resp_payload.message, sizeof(resp_payload.message), "TLD '%s' registered successfully.", req_payload.tld_name);
-                    dlog("Server: TLD '%s' registered.", req_payload.tld_name);
+                    strncpy(resp_payload.message, "TLD registered successfully.", sizeof(resp_payload.message) - 1);
                 } else {
-                    // find_tld_by_name could be used here to check if it was an "already_exists" case vs other error
-                    if (find_tld_by_name(server_config->net_ctx->tld_manager, req_payload.tld_name)) {
-                        resp_payload.status = TLD_REG_RESP_ERROR_ALREADY_EXISTS;
-                        snprintf(resp_payload.message, sizeof(resp_payload.message), "TLD '%s' already exists.", req_payload.tld_name);
-                        dlog("Server: TLD '%s' already exists.", req_payload.tld_name);
-                    } else {
-                        resp_payload.status = TLD_REG_RESP_ERROR_INTERNAL_SERVER_ERROR;
-                        snprintf(resp_payload.message, sizeof(resp_payload.message), "Failed to register TLD '%s'.", req_payload.tld_name);
-                        dlog("ERROR: Server: Failed to register TLD '%s'.", req_payload.tld_name);
+                    resp_payload.status = TLD_REG_RESP_ERROR_INTERNAL_SERVER_ERROR;
+                    strncpy(resp_payload.message, "Internal server error registering TLD.", sizeof(resp_payload.message) - 1);
+                }
+            }
+
+            response_payload_len = serialize_payload_tld_register_resp(&resp_payload, response_payload_buf, sizeof(response_payload_buf));
+            if (response_payload_len < 0) {
+                dlog("ERROR: Server: Failed to serialize TLD_REGISTER_RESP payload.");
+                // No specific cleanup for resp_payload needed as it's stack allocated and contains no pointers
+                break; 
+            }
+            response_packet.data = response_payload_buf;
+            response_packet.data_len = response_payload_len;
+            break; // End of TLD_REGISTER_REQ case
+        }
+
+        case PACKET_TYPE_DNS_QUERY: {
+            dlog("Server: Received DNS_QUERY");
+            payload_dns_query_t query_payload;
+            if (deserialize_payload_dns_query(received_packet.data, received_packet.data_len, &query_payload) < 0) {
+                dlog("ERROR: Server: Failed to deserialize DNS_QUERY payload.");
+                break;
+            }
+
+            dlog("Server: Query for Name: %s, Type: %d", query_payload.query_name, query_payload.type);
+
+            response_packet.type = PACKET_TYPE_DNS_RESPONSE;
+            payload_dns_response_t dns_resp_payload;
+            memset(&dns_resp_payload, 0, sizeof(payload_dns_response_t)); // Initializes records to NULL and count to 0
+
+            // Perform DNS lookup using tld_manager
+            // This is a simplified lookup. A real one would parse FQDN, find TLD, then record.
+            // For now, assume query_payload.query_name is the full FQDN and tld_manager can search records directly
+            // or we need a more sophisticated lookup function.
+
+            // TODO: Implement a proper lookup function in tld_manager or a new dns_resolver module.
+            // dns_record_t* found_records = NULL; // This would be an array
+            // int num_found_records = 0;
+            // dns_lookup_status = server_config->net_ctx->tld_manager->lookup_records(query_payload.query_name, query_payload.type, &found_records, &num_found_records);
+
+            // SIMULATED LOOKUP for now:
+            tld_manager_t* tld_m = server_config->net_ctx->tld_manager;
+            dns_record_t* result_records = NULL;
+            int result_count = 0;
+
+            // Iterate through all TLDs and all their records (very inefficient, for placeholder only)
+            for (size_t i = 0; i < tld_m->tld_count; ++i) {
+                tld_t* current_tld = tld_m->tlds[i];
+                for (size_t j = 0; j < current_tld->record_count; ++j) {
+                    if (strcmp(current_tld->records[j].name, query_payload.query_name) == 0 && 
+                        current_tld->records[j].type == query_payload.type) {
+                        // Found a match
+                        // Reallocate result_records to add this one
+                        dns_record_t* temp = realloc(result_records, (result_count + 1) * sizeof(dns_record_t));
+                        if (!temp) {
+                            dlog("ERROR: Server: Failed to allocate memory for DNS response records.");
+                            // Free previously allocated result_records if any
+                            if(result_records) free(result_records);
+                            dns_resp_payload.status = DNS_STATUS_SERVFAIL;
+                            // Jump to serialization with error status, or break and rely on default SERVFAIL if no packet sent
+                            goto serialize_dns_response; // Ugly, but avoids deep nesting for error path
+                        }
+                        result_records = temp;
+                        // Copy the found record (important: duplicate strings)
+                        result_records[result_count].name = strdup(current_tld->records[j].name);
+                        result_records[result_count].rdata = strdup(current_tld->records[j].rdata);
+                        result_records[result_count].type = current_tld->records[j].type;
+                        result_records[result_count].ttl = current_tld->records[j].ttl;
+                        result_records[result_count].last_updated = current_tld->records[j].last_updated;
+                        
+                        if (!result_records[result_count].name || !result_records[result_count].rdata) {
+                             dlog("ERROR: Server: Failed to strdup for DNS record in response.");
+                             if (result_records[result_count].name) free(result_records[result_count].name);
+                             if (result_records[result_count].rdata) free(result_records[result_count].rdata);
+                             // Don't increment result_count for this failed record
+                             // Potentially could lead to SERVFAIL if this was the only potential match
+                        } else {
+                            result_count++;
+                        }
                     }
                 }
             }
 
-            // Send response
-            nexus_packet_t response_packet;
-            memset(&response_packet, 0, sizeof(response_packet));
-            response_packet.version = received_packet.version; // Use same version or current protocol version
-            response_packet.type = PACKET_TYPE_TLD_REGISTER_RESP;
-            response_packet.session_id = received_packet.session_id; // Echo session ID
-
-            uint8_t resp_payload_buf[512]; // Estimate size; use get_serialized_... for exact
-            ssize_t resp_payload_len = serialize_payload_tld_register_resp(&resp_payload, resp_payload_buf, sizeof(resp_payload_buf));
-            if (resp_payload_len < 0) {
-                dlog("ERROR: Server: Failed to serialize TLD_REGISTER_RESP payload.");
-                break; // Out of switch case
+            if (result_count > 0) {
+                dns_resp_payload.status = DNS_STATUS_SUCCESS;
+                dns_resp_payload.record_count = result_count;
+                dns_resp_payload.records = result_records; // result_records is already allocated and filled
+            } else {
+                dns_resp_payload.status = DNS_STATUS_NXDOMAIN; // Or whatever status is appropriate
+                dns_resp_payload.record_count = 0;
+                dns_resp_payload.records = NULL;
+                 if(result_records) free(result_records); // Free if allocated but no valid records were strdup'd
             }
-            response_packet.data = resp_payload_buf;
-            response_packet.data_len = resp_payload_len;
-
-            uint8_t final_response_buf[1024]; // Estimate for full packet
-            ssize_t final_response_len = serialize_nexus_packet(&response_packet, final_response_buf, sizeof(final_response_buf));
-            if (final_response_len < 0) {
-                dlog("ERROR: Server: Failed to serialize final response NEXUS packet.");
-                break;
-            }
-
-            // Send the data on the stream
-            // ngtcp2_conn_write_stream or ngtcp2_conn_writev_stream
-            // For simplicity, assuming a function like send_on_stream exists or using ngtcp2 directly.
-            // This requires knowing the stream ID is bidirectional and client is expecting a response on it.
             
-            int rv = ngtcp2_conn_write_stream(conn, NULL, NULL, 
-                                            NULL, 0, NULL,
-                                            0, stream_id, final_response_buf, final_response_len, 
-                                            get_timestamp());
-            if (rv != 0 && rv != NGTCP2_ERR_STREAM_DATA_BLOCKED) { // Data blocked is not a fatal error
-                dlog("ERROR: Server: Failed to write stream data for TLD_REGISTER_RESP: %s", ngtcp2_strerror(rv));
+            // Label for goto in case of memory allocation failure during record duplication
+            serialize_dns_response:;
+
+            response_payload_len = serialize_payload_dns_response(&dns_resp_payload, response_payload_buf, sizeof(response_payload_buf));
+            
+            // IMPORTANT: Free records memory if it was allocated for the response payload (name and rdata were strdup'd)
+            if (dns_resp_payload.records) {
+                for (int i = 0; i < dns_resp_payload.record_count; ++i) {
+                    if (dns_resp_payload.records[i].name) free(dns_resp_payload.records[i].name);
+                    if (dns_resp_payload.records[i].rdata) free(dns_resp_payload.records[i].rdata);
+                }
+                free(dns_resp_payload.records); // Free the array of records itself
+                dns_resp_payload.records = NULL; // Avoid double free if error occurs after this
             }
-            dlog("Server: Sent TLD_REGISTER_RESP, %zd bytes on stream %ld", final_response_len, stream_id);
-            break;
+
+            if (response_payload_len < 0) {
+                dlog("ERROR: Server: Failed to serialize DNS_RESPONSE payload.");
+                // response_packet.data will not be set, so no response sent
+                break; 
+            }
+            response_packet.data = response_payload_buf;
+            response_packet.data_len = response_payload_len;
+            break; // End of DNS_QUERY case
         }
-        // TODO: Handle other packet types (DNS_QUERY, TLD_MIRROR_REQ, etc.)
+
+        // TODO: Handle other packet types (..., TLD_MIRROR_REQ, etc.)
         default:
             dlog("WARNING: Server: Received unhandled packet type %d on stream %ld", received_packet.type, stream_id);
+            // No response will be sent for unhandled types by default
             break;
     }
 
-    free(received_packet.data); // Free data allocated by deserialize_nexus_packet
-    // Mark data as consumed for this stream
-    // ngtcp2_conn_extend_max_stream_data(conn, stream_id, datalen);
-    // The return 0 from this callback usually means data is consumed.
-    // ngtcp2 library might handle extending stream data offset internally based on callback processing.
-    return 0;  // Return success
+    // Free data allocated by deserialize_nexus_packet for the received packet
+    if (received_packet.data) {
+        free(received_packet.data);
+        received_packet.data = NULL;
+    }
+
+    // Send the response packet if its data field is set (i.e., a response was prepared)
+    if (response_packet.data && response_packet.data_len > 0) {
+        uint8_t final_response_buf[2048]; // Larger buffer for full nexus packet with DNS records
+        ssize_t final_response_len = serialize_nexus_packet(&response_packet, final_response_buf, sizeof(final_response_buf));
+        
+        if (final_response_len < 0) {
+            dlog("ERROR: Server: Failed to serialize final response NEXUS packet for type %d.", response_packet.type);
+        } else {
+            // ngtcp2_conn_write_stream or ngtcp2_conn_writev_stream
+            // This requires knowing the stream ID is bidirectional and client is expecting a response on it.
+            // For QUIC, responses are often sent on the same stream the request came on if it's client-initiated bidi.
+            int rv = ngtcp2_conn_write_stream(conn, NULL, NULL, 
+                                            NULL, 0, NULL, // No fin, no early_data, no early_data_ctx, no pnum_written
+                                            NGTCP2_STREAM_DATA_FLAG_NONE, stream_id, final_response_buf, final_response_len, 
+                                            get_timestamp()); // Use current conn timestamp
+            if (rv != 0 && rv != NGTCP2_ERR_STREAM_DATA_BLOCKED && rv != NGTCP2_ERR_STREAM_SHUT_WR) { 
+                dlog("ERROR: Server: Failed to write stream data for response type %d: %s (%d)", response_packet.type, ngtcp2_strerror(rv), rv);
+            }
+            dlog("Server: Sent response type %d, %zd bytes on stream %ld", response_packet.type, final_response_len, stream_id);
+        }
+    }
+
+    return 0;  // Return success from callback
 }
 
 static int on_handshake_completed(ngtcp2_conn *conn, void *user_data) {
@@ -211,7 +319,7 @@ static int on_recv_crypto_data(ngtcp2_conn *conn, ngtcp2_encryption_level encryp
     (void)conn;           // Suppress unused parameter warning
     (void)offset;         // Suppress unused parameter warning
     (void)data;           // Suppress unused parameter warning
-    (void)encryption_level; // Suppress unused parameter warning
+    // (void)encryption_level; // Suppress unused parameter warning, now that it's used in dlog
     
     nexus_server_config_t *config = (nexus_server_config_t *)user_data;
     
@@ -222,12 +330,7 @@ static int on_recv_crypto_data(ngtcp2_conn *conn, ngtcp2_encryption_level encryp
     
     dlog("Server received crypto data (%zu bytes) at encryption level %d", datalen, encryption_level);
     
-    // Process the handshake - in a real implementation you would need to process 
-    // the SSL data properly, but for now we'll simplify
-    int rv = SSL_do_handshake(config->crypto_ctx->ssl);
-    if (rv > 0) {
-        dlog("SSL handshake progressed");
-    }
+    dlog("Server: SSL_do_handshake would be called here");
     
     return 0;
 }

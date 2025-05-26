@@ -8,6 +8,22 @@
 
 // --- Helper Functions for Serialization --- 
 
+// Forward declarations for static helper functions
+static int write_uint8(uint8_t val, uint8_t* buf, size_t buf_len, size_t* offset);
+static int write_uint16(uint16_t val, uint8_t* buf, size_t buf_len, size_t* offset);
+static int write_uint32(uint32_t val, uint8_t* buf, size_t buf_len, size_t* offset);
+static int write_uint64(uint64_t val, uint8_t* buf, size_t buf_len, size_t* offset);
+static int write_fixed_string(const char* str, size_t str_fixed_len, uint8_t* buf, size_t buf_len, size_t* offset);
+static int write_bytes(const uint8_t* data, uint32_t data_len, uint8_t* buf, size_t buf_len, size_t* offset);
+
+static int read_uint8(const uint8_t* buf, size_t buf_len, size_t* offset, uint8_t* out_val);
+static int read_uint16(const uint8_t* buf, size_t buf_len, size_t* offset, uint16_t* out_val);
+static int read_uint32(const uint8_t* buf, size_t buf_len, size_t* offset, uint32_t* out_val);
+static int read_uint64(const uint8_t* buf, size_t buf_len, size_t* offset, uint64_t* out_val);
+static int read_fixed_string(const uint8_t* buf, size_t buf_len, size_t* offset, char* out_str, size_t str_fixed_len);
+static int read_bytes_alloc(const uint8_t* buf, size_t buf_len, size_t* offset, uint32_t data_len, uint8_t** out_data);
+static int read_bytes(const uint8_t* buf, size_t buf_len, size_t* offset, uint8_t* out_data, uint32_t data_to_read_len);
+
 // Write a uint8_t to buffer and advance offset
 static int write_uint8(uint8_t val, uint8_t* buf, size_t buf_len, size_t* offset) {
     if (*offset + sizeof(uint8_t) > buf_len) return -1; // Buffer too small
@@ -70,8 +86,11 @@ static int write_fixed_string(const char* str, size_t fixed_len, uint8_t* buf, s
 
 // Write variable length data (byte array)
 static int write_bytes(const uint8_t* data, uint32_t data_len, uint8_t* buf, size_t buf_len, size_t* offset) {
-    if (*offset + data_len > buf_len) return -1;
-    memcpy(buf + *offset, data, data_len);
+    if (!data && data_len > 0) return -1; // Null data with non-zero length
+    if (*offset + data_len > buf_len) return -1; // Buffer too small
+    if (data_len > 0) {
+        memcpy(buf + *offset, data, data_len);
+    }
     *offset += data_len;
     return 0;
 }
@@ -130,31 +149,43 @@ static int read_fixed_string(const uint8_t* buf, size_t buf_len, size_t* offset,
 
 // Reads variable length data. Allocates memory for out_data which caller must free.
 static int read_bytes_alloc(const uint8_t* buf, size_t buf_len, size_t* offset, uint32_t data_len, uint8_t** out_data) {
-    if (!buf || !out_data || !offset) {
+    if (!buf || !offset || !out_data) {
         dlog("ERROR: Invalid parameters to read_bytes_alloc");
+        if(out_data) *out_data = NULL;
         return -1;
     }
-    
     if (*offset + data_len > buf_len) {
-        dlog("ERROR: Buffer too small for data: offset=%zu, data_len=%u, buf_len=%zu", 
-             *offset, data_len, buf_len);
-        return -1;
+        dlog("ERROR: Buffer too small in read_bytes_alloc. Offset: %zu, DataLen: %u, BufLen: %zu", *offset, data_len, buf_len);
+        *out_data = NULL;
+        return -1; 
     }
     
     if (data_len == 0) {
-        *out_data = NULL;
+        *out_data = NULL; // No data to read, ensure out_data is NULL
+        // *offset remains unchanged as no bytes are read
         return 0;
     }
-    
-    *out_data = (uint8_t*)malloc(data_len);
+
+    *out_data = malloc(data_len);
     if (!*out_data) {
-        dlog("ERROR: Failed to allocate %u bytes for data", data_len);
-        return -1; // Malloc failed
+        dlog("ERROR: Failed to allocate memory in read_bytes_alloc (%u bytes)", data_len);
+        return -1; 
     }
     
     memcpy(*out_data, buf + *offset, data_len);
     *offset += data_len;
-    dlog("Read %u bytes successfully", data_len);
+    return 0;
+}
+
+// Read a sequence of bytes from buffer into a pre-allocated buffer, and advance offset.
+static int read_bytes(const uint8_t* buf, size_t buf_len, size_t* offset, uint8_t* out_data, uint32_t data_to_read_len) {
+    if (!buf || !offset || !out_data) return -1;
+    if (*offset + data_to_read_len > buf_len) return -1; // Buffer too small or trying to read past end
+
+    if (data_to_read_len > 0) {
+        memcpy(out_data, buf + *offset, data_to_read_len);
+    }
+    *offset += data_to_read_len;
     return 0;
 }
 
@@ -302,11 +333,22 @@ ssize_t deserialize_payload_tld_register_resp(const uint8_t* data, size_t data_l
 // This is an example. A more robust way is to send len prefix for strings.
 ssize_t get_serialized_dns_record_size(const dns_record_t* record) {
     if (!record || !record->name || !record->rdata) return -1;
-    return strlen(record->name) + 1 + 
-           sizeof(dns_record_type_t) + 
-           sizeof(uint32_t) + // ttl
-           sizeof(time_t)   + // last_updated (usually uint64_t or uint32_t)
-           strlen(record->rdata) + 1;
+
+    ssize_t total_size = 0;
+    size_t name_len = strlen(record->name) + 1; // Include null terminator as per serialize_dns_record
+    size_t rdata_len = strlen(record->rdata) + 1; // Include null terminator
+
+    total_size += sizeof(uint32_t); // name_len (serialized as uint32_t)
+    total_size += name_len;         // name bytes (including null)
+    
+    total_size += sizeof(uint32_t); // type (serialized as uint32_t)
+    total_size += sizeof(uint32_t); // ttl
+    total_size += sizeof(uint64_t); // last_updated
+
+    total_size += sizeof(uint32_t); // rdata_len (serialized as uint32_t)
+    total_size += rdata_len;        // rdata bytes (including null)
+    
+    return total_size;
 }
 
 // Serializes a single dns_record_t. out_buf must be large enough.
@@ -415,10 +457,119 @@ ssize_t get_serialized_payload_tld_sync_update_size(const payload_tld_sync_updat
 ssize_t serialize_payload_tld_sync_update(const payload_tld_sync_update_t* payload, uint8_t* out_buf, size_t out_buf_len) { (void)payload; (void)out_buf; (void)out_buf_len; return -1; }
 ssize_t deserialize_payload_tld_sync_update(const uint8_t* data, size_t data_len, payload_tld_sync_update_t* payload) { (void)data; (void)data_len; (void)payload; return -1; }
 
-ssize_t get_serialized_payload_dns_query_size(const payload_dns_query_t* payload) { (void)payload; return -1; }
-ssize_t serialize_payload_dns_query(const payload_dns_query_t* payload, uint8_t* out_buf, size_t out_buf_len) { (void)payload; (void)out_buf; (void)out_buf_len; return -1; }
-ssize_t deserialize_payload_dns_query(const uint8_t* data, size_t data_len, payload_dns_query_t* payload) { (void)data; (void)data_len; (void)payload; return -1; }
+ssize_t get_serialized_payload_dns_query_size(const payload_dns_query_t* payload) {
+    if (!payload) return -1;
+    // Size of query_name (fixed buffer) + size of type enum (serialized as uint32_t)
+    return sizeof(payload->query_name) + sizeof(uint32_t);
+}
 
-ssize_t get_serialized_payload_dns_response_size(const payload_dns_response_t* payload) { (void)payload; return -1; }
-ssize_t serialize_payload_dns_response(const payload_dns_response_t* payload, uint8_t* out_buf, size_t out_buf_len) { (void)payload; (void)out_buf; (void)out_buf_len; return -1; }
-ssize_t deserialize_payload_dns_response(const uint8_t* data, size_t data_len, payload_dns_response_t* payload) { (void)data; (void)data_len; (void)payload; return -1; } 
+ssize_t serialize_payload_dns_query(const payload_dns_query_t* payload, uint8_t* out_buf, size_t out_buf_len) {
+    if (!payload || !out_buf) return -1;
+    ssize_t required_size = get_serialized_payload_dns_query_size(payload);
+    if (required_size < 0 || (size_t)required_size > out_buf_len) return -1;
+
+    size_t offset = 0;
+    // query_name is a fixed-size char array, write it directly
+    if (write_bytes((const uint8_t*)payload->query_name, sizeof(payload->query_name), out_buf, out_buf_len, &offset) != 0) return -1;
+    // Serialize dns_record_type_t as uint32_t
+    if (write_uint32((uint32_t)payload->type, out_buf, out_buf_len, &offset) != 0) return -1;
+    return offset;
+}
+
+ssize_t deserialize_payload_dns_query(const uint8_t* data, size_t data_len, payload_dns_query_t* payload) {
+    if (!data || !payload) return -1;
+    // Minimum size: fixed query_name buffer + uint32_t for type
+    ssize_t min_size = sizeof(payload->query_name) + sizeof(uint32_t);
+    if (data_len < (size_t)min_size) return -1;
+
+    size_t offset = 0;
+    // query_name is a fixed-size char array, read it directly
+    if (read_bytes(data, data_len, &offset, (uint8_t*)payload->query_name, sizeof(payload->query_name)) != 0) return -1;
+    // Ensure null termination for query_name, as read_bytes might not guarantee it if source wasn't null-terminated within the fixed size
+    payload->query_name[sizeof(payload->query_name) - 1] = '\0';
+
+    uint32_t type_u32;
+    if (read_uint32(data, data_len, &offset, &type_u32) != 0) return -1;
+    payload->type = (dns_record_type_t)type_u32;
+    return offset;
+}
+
+ssize_t get_serialized_payload_dns_response_size(const payload_dns_response_t* payload) {
+    if (!payload) return -1;
+    // Size of status (uint8_t) + size of record_count (uint32_t)
+    ssize_t total_size = sizeof(uint8_t) + sizeof(uint32_t);
+    for (int i = 0; i < payload->record_count; ++i) {
+        if (!payload->records || !&payload->records[i]) return -1; // Invalid record array or entry
+        ssize_t record_size = get_serialized_dns_record_size(&payload->records[i]);
+        if (record_size < 0) return -1; // Error getting size of a record
+        total_size += record_size;
+    }
+    return total_size;
+}
+
+ssize_t serialize_payload_dns_response(const payload_dns_response_t* payload, uint8_t* out_buf, size_t out_buf_len) {
+    if (!payload || !out_buf) return -1;
+    ssize_t required_size = get_serialized_payload_dns_response_size(payload);
+    if (required_size < 0 || (size_t)required_size > out_buf_len) return -1;
+
+    size_t offset = 0;
+    if (write_uint8(payload->status, out_buf, out_buf_len, &offset) != 0) return -1;
+    if (write_uint32((uint32_t)payload->record_count, out_buf, out_buf_len, &offset) != 0) return -1;
+
+    for (int i = 0; i < payload->record_count; ++i) {
+        if (!payload->records || !&payload->records[i]) return -1; // Should not happen if size check passed
+        size_t record_bytes_written = 0; // To capture bytes written by serialize_dns_record
+        if (serialize_dns_record(&payload->records[i], out_buf + offset, out_buf_len - offset, &record_bytes_written) != 0) {
+            return -1; // Error serializing a record
+        }
+        offset += record_bytes_written; // Advance offset by actual bytes written for the record
+    }
+    return offset;
+}
+
+ssize_t deserialize_payload_dns_response(const uint8_t* data, size_t data_len, payload_dns_response_t* payload) {
+    if (!data || !payload) return -1;
+    // Minimum size: status (uint8_t) + record_count (uint32_t)
+    if (data_len < (sizeof(uint8_t) + sizeof(uint32_t))) return -1;
+
+    size_t offset = 0;
+    uint8_t status_u8;
+    if (read_uint8(data, data_len, &offset, &status_u8) != 0) return -1;
+    payload->status = (dns_response_status_t)status_u8;
+
+    uint32_t record_count_u32;
+    if (read_uint32(data, data_len, &offset, &record_count_u32) != 0) return -1;
+    payload->record_count = (int)record_count_u32;
+
+    if (payload->record_count < 0) return -1; // Invalid record count
+
+    if (payload->record_count > 0) {
+        payload->records = malloc(payload->record_count * sizeof(dns_record_t));
+        if (!payload->records) {
+            // Failed to allocate memory for records
+            payload->record_count = 0; // Ensure consistency
+            return -1; 
+        }
+        // Initialize memory for safety, especially for char* members in dns_record_t
+        memset(payload->records, 0, payload->record_count * sizeof(dns_record_t)); 
+
+        for (int i = 0; i < payload->record_count; ++i) {
+            size_t record_bytes_read = 0;
+            if (deserialize_dns_record(data + offset, data_len - offset, &payload->records[i], &record_bytes_read) != 0) {
+                // Error deserializing a record. Free already allocated records and return error.
+                for (int j = 0; j < i; ++j) {
+                    free(payload->records[j].name);
+                    free(payload->records[j].rdata);
+                }
+                free(payload->records);
+                payload->records = NULL;
+                payload->record_count = 0;
+                return -1;
+            }
+            offset += record_bytes_read; // Advance offset by actual bytes read for the record
+        }
+    } else {
+        payload->records = NULL; // No records to deserialize
+    }
+    return offset;
+} 

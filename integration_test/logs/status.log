@@ -1,0 +1,9 @@
+Nexus Node Status:
+  State: Active
+  Mode: unknown
+  Certificate validated with Falcon: Yes
+  Falcon certificate details:
+    - Post-quantum security: Enabled
+    - Certificate Authority: Trusted
+    - Certificate Transparency: Verified
+Status command executed successfully

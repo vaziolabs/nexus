@@ -26,8 +26,8 @@ typedef struct {
     void *merkle_tree;         // Merkle tree for efficient verification
     pthread_mutex_t lock;
     char *scope_id;            // Network scope identifier (private/public/federated/ephemeral)
-    uint8_t public_key[1793];  // Falcon-1024 public key for this log
-    uint8_t private_key[2305]; // Falcon-1024 private key for this log
+    char *log_filename;        // Path to the log file on disk
+    falcon_keys_t *keys;       // Falcon-1024 keys for this log
 } ct_log_t;
 
 // Merkle tree node structure
@@ -45,30 +45,31 @@ typedef struct {
 
 // Proof structure for certificate inclusion
 typedef struct {
-    uint8_t leaf_hash[32];     // Hash of the certificate
+    nexus_cert_t *cert;        // Certificate for which the proof is generated
+    uint8_t *log_id;           // ID of the log that issued the proof
+    uint8_t *log_pubkey;       // Public key of the log
+    size_t log_pubkey_len;     // Length of the public key
     uint8_t **path;            // Array of hashes on the path to the root
     int path_len;              // Length of the path
-    int leaf_index;            // Index of the leaf in the tree
     uint8_t root_hash[32];     // Root hash of the Merkle tree
     uint64_t timestamp;        // Timestamp of the proof
-    uint8_t signature[1330];   // Signature over the proof
 } ct_proof_t;
 
 // Function declarations
-int init_certificate_transparency(network_context_t *net_ctx, ct_log_t **ct_log);
+ct_log_t* init_certificate_transparency(network_context_t *net_ctx);
 void cleanup_certificate_transparency(ct_log_t *ct_log);
 
 // CT log operations
-int create_ct_log(const char *scope_id, ct_log_t **ct_log);
+ct_log_t* create_ct_log(const char *log_filename, const char *node_hostname, const char *network_mode);
 int load_ct_log(const char *path, ct_log_t **ct_log);
 int save_ct_log(const ct_log_t *ct_log, const char *path);
-int add_certificate_to_ct_log(ct_log_t *ct_log, nexus_cert_t *cert);
+ct_log_entry_t* add_certificate_to_ct_log(ct_log_t *ct_log, nexus_cert_t *cert, const uint8_t *sct_signature, size_t sct_signature_len);
 int verify_certificate_in_ct_log(ct_log_t *ct_log, nexus_cert_t *cert, ct_proof_t **proof);
 
 // Merkle tree operations
 int build_merkle_tree(ct_log_t *ct_log);
-int verify_merkle_proof(ct_proof_t *proof, ct_log_t *ct_log);
-int generate_merkle_proof(ct_log_t *ct_log, nexus_cert_t *cert, ct_proof_t **proof);
+int verify_merkle_proof(ct_proof_t *proof, const uint8_t *expected_root_hash, size_t root_hash_len, ct_log_entry_t *entry_to_verify);
+ct_proof_t* generate_merkle_proof(ct_log_t *ct_log, nexus_cert_t *cert);
 
 // Network operations
 int sync_ct_log_with_peers(ct_log_t *ct_log, network_context_t *net_ctx);

@@ -77,16 +77,20 @@ start_server() {
     local server_pid=$!
     echo $server_pid > "$server_pid_file"
     
-    # Wait for server to start up
-    sleep 2
+    # Wait for server to start up with retries
+    local attempts=0
+    local max_attempts=10 # Wait for up to 10 seconds
+    while ! kill -0 $server_pid 2>/dev/null; do
+        attempts=$((attempts+1))
+        if [ "$attempts" -ge "$max_attempts" ]; then
+            error "Failed to start NEXUS server after $max_attempts attempts. Check logs at $server_log_file"
+        fi
+        log "Waiting for server to start (attempt $attempts/$max_attempts)..."
+        sleep 1
+    done
     
-    # Check if server is running
-    if kill -0 $server_pid 2>/dev/null; then
-        success "NEXUS server started successfully (PID: $server_pid)"
-        return 0
-    else
-        error "Failed to start NEXUS server. Check logs at $server_log_file"
-    fi
+    success "NEXUS server started successfully (PID: $server_pid)"
+    return 0
 }
 
 # Start a NEXUS client connecting to a server

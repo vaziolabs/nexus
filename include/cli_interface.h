@@ -77,4 +77,10 @@ int receive_response_from_service(char **response);
 void print_command_help(void);
 void free_cli_command(cli_command_t *cmd);
 
+// New CLI command handlers
+int handle_cli_command(int argc, char *argv[]);
+int handle_status_command(int argc, char *argv[]);
+int handle_resolve_command(int argc, char *argv[]);
+int handle_send_command(int argc, char *argv[]);
+
 #endif // CLI_INTERFACE_H 

@@ -113,6 +113,16 @@ typedef struct {
     // Records follow in the serialized data
 } payload_tld_sync_update_t;
 
+// DNS Response Status Codes
+typedef enum {
+    DNS_STATUS_SUCCESS = 0,      // No error
+    DNS_STATUS_FORMERR = 1,      // Format error in query
+    DNS_STATUS_SERVFAIL = 2,     // Server failure
+    DNS_STATUS_NXDOMAIN = 3,     // Non-existent domain
+    DNS_STATUS_NOTIMP = 4,       // Not implemented
+    DNS_STATUS_REFUSED = 5       // Query refused
+} dns_response_status_t;
+
 // DNS query payload
 typedef struct {
     char query_name[256];        // Name to query
@@ -121,9 +131,9 @@ typedef struct {
 
 // DNS response payload
 typedef struct {
-    uint8_t status;              // Status code
+    dns_response_status_t status; // Status code (using the new enum)
     int record_count;            // Number of records
-    // Records follow in the serialized data
+    dns_record_t* records;       // Pointer to an array of DNS records
 } payload_dns_response_t;
 
 #endif // DNS_TYPES_H 
