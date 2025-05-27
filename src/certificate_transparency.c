@@ -636,4 +636,65 @@ int ct_sign_certificate(nexus_cert_t *cert, const uint8_t *private_key, uint8_t 
     
     // Sign the message using Falcon
     return falcon_sign(private_key, message, message_len, signature);
+}
+
+// Function to verify signatures in the CT log
+static int verify_signature_in_ct_log(ct_log_t *log, ct_log_entry_t *entry_to_verify, ct_proof_t *proof) {
+    if (!log || !entry_to_verify || !proof || !proof->log_pubkey) {
+        printf("ERROR: Invalid parameters passed to verify_signature_in_ct_log\n");
+        return -1;
+    }
+    
+    // Create message to verify (cert + timestamp + log_id)
+    uint8_t message[2048];
+    size_t message_len = 0;
+    
+    // Add certificate common_name to message
+    if (entry_to_verify->cert->common_name) {
+        size_t common_name_len = strlen(entry_to_verify->cert->common_name);
+        memcpy(message + message_len, entry_to_verify->cert->common_name, common_name_len);
+        message_len += common_name_len;
+    }
+    
+    // Add certificate signature to message
+    memcpy(message + message_len, entry_to_verify->cert->signature, sizeof(entry_to_verify->cert->signature));
+    message_len += sizeof(entry_to_verify->cert->signature);
+    
+    // Add timestamp to message
+    memcpy(message + message_len, &entry_to_verify->timestamp, sizeof(entry_to_verify->timestamp));
+    message_len += sizeof(entry_to_verify->timestamp);
+    
+    // Add log_id to message
+    memcpy(message + message_len, entry_to_verify->log_id, sizeof(entry_to_verify->log_id));
+    message_len += sizeof(entry_to_verify->log_id);
+    
+    // Determine signature length from header byte
+    size_t max_sig_len = FALCON_SIG_COMPRESSED_MAXSIZE(10);
+    size_t sig_len = max_sig_len;
+    
+    // From the end, find the last non-zero byte to determine actual length
+    for (size_t i = max_sig_len - 1; i > 0; i--) {
+        if (entry_to_verify->signature[i] != 0) {
+            sig_len = i + 1;
+            break;
+        }
+    }
+    
+    // Create temporary buffer for verification
+    uint8_t tmp[FALCON_TMPSIZE_VERIFY(10)];
+    
+    // Verify using direct Falcon API
+    int verify_result = falcon_verify(
+        entry_to_verify->signature, sig_len, FALCON_SIG_COMPRESSED,
+        proof->log_pubkey, FALCON_PUBKEY_SIZE(10),
+        message, message_len,
+        tmp, sizeof(tmp)
+    );
+    
+    if (verify_result != 0) {
+        printf("ERROR: Falcon signature verification in CT log failed with code %d\n", verify_result);
+        return -1;
+    }
+    
+    return 0;
 } 

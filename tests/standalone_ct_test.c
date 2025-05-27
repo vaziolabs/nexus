@@ -161,7 +161,7 @@ static void test_certificate_operations(void) {
     printf("Certificate operations tests passed\n");
 }
 
-int main(int argc, char *argv[]) {
+int test_standalone_ct_main(int argc, char *argv[]) {
     (void)argc;
     (void)argv;
     

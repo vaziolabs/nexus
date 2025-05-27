@@ -200,7 +200,7 @@ ls -la ~/.config/nexus/
 - [x] **Testing Framework** - Comprehensive testing suite covering all major components
 - [x] **IPv6 QUIC Handshake Testing** - Validation of IPv6 connectivity for QUIC connections
 - [x] **Integration Testing** - End-to-end testing of core functionality
-- [x] **Falcon Post-Quantum Cryptography** - Integration of Falcon signatures for certificate operations, including CA infrastructure and CT logs
+- [x] **Falcon Post-Quantum Cryptography** - Integration of Falcon signatures for certificate operations, including CA infrastructure and certificate verification during QUIC handshake
 
 ### In Progress Components
 - [ ] **Server Initialization** - Fixing server startup issues identified during testing

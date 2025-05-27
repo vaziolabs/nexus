@@ -218,41 +218,58 @@ static void test_falcon_keypair_generation(void) {
 static void test_falcon_sign_and_verify(void) {
     printf("Testing Falcon signature and verification...\n");
     
-    uint8_t public_key[1793];  // Falcon-1024 public key size
-    uint8_t private_key[2305]; // Falcon-1024 private key size
-    uint8_t signature[1330];   // Falcon-1024 signature size
+    // Initialize RNG
+    shake256_context rng;
+    assert(shake256_init_prng_from_system(&rng) == 0);
     
-    // Generate keypair
-    int result = generate_falcon_keypair(public_key, private_key);
-    assert(result == 0);
+    // Create keypair
+    uint8_t private_key[FALCON_PRIVKEY_SIZE(10)];
+    uint8_t public_key[FALCON_PUBKEY_SIZE(10)];
+    uint8_t tmp[FALCON_TMPSIZE_KEYGEN(10)];
     
-    // Create test message
-    const char *message = "This is a test message to sign";
+    assert(falcon_keygen_make(&rng, 10, private_key, sizeof(private_key), 
+                             public_key, sizeof(public_key), 
+                             tmp, sizeof(tmp)) == 0);
+    
+    // Message to sign
+    const char *message = "Test message for Falcon";
+    size_t message_len = strlen(message);
     
     // Sign the message
-    result = falcon_sign(private_key, message, strlen(message), signature);
-    assert(result == 0);
+    uint8_t signature[FALCON_SIG_COMPRESSED_MAXSIZE(10)];
+    size_t signature_len = FALCON_SIG_COMPRESSED_MAXSIZE(10);
     
-    // Verify signature has value (not all zeros)
-    int signature_has_value = 0;
-    for (int i = 0; i < sizeof(signature); i++) {
-        if (signature[i] != 0) {
-            signature_has_value = 1;
-            break;
-        }
-    }
-    assert(signature_has_value);
+    uint8_t tmp2[FALCON_TMPSIZE_SIGNDYN(10)];
+    
+    assert(falcon_sign_dyn(&rng, signature, &signature_len, FALCON_SIG_COMPRESSED,
+                          private_key, sizeof(private_key), 
+                          message, message_len,
+                          tmp2, sizeof(tmp2)) == 0);
+    
+    printf("Message signed successfully, signature length: %zu\n", signature_len);
     
     // Verify the signature
-    result = falcon_verify_sig(public_key, message, strlen(message), signature);
+    uint8_t tmp3[FALCON_TMPSIZE_VERIFY(10)];
+    
+    int result = falcon_verify(signature, signature_len, FALCON_SIG_COMPRESSED,
+                              public_key, sizeof(public_key),
+                              message, message_len,
+                              tmp3, sizeof(tmp3));
+    
     assert(result == 0);
     printf("Signature verification successful\n");
     
-    // Modify the message and verify it fails
-    const char *modified_message = "This is a modified test message";
-    result = falcon_verify_sig(public_key, modified_message, strlen(modified_message), signature);
+    // Tamper with the message and verify it fails
+    const char *tampered = "Tampered message for Falcon";
+    size_t tampered_len = strlen(tampered);
+    
+    result = falcon_verify(signature, signature_len, FALCON_SIG_COMPRESSED,
+                          public_key, sizeof(public_key),
+                          tampered, tampered_len,
+                          tmp3, sizeof(tmp3));
+    
     assert(result != 0);
-    printf("Modified message verification failed as expected\n");
+    printf("Tampered message verification failed as expected\n");
     
     printf("Falcon signature and verification test passed\n");
 }

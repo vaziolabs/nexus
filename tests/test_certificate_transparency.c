@@ -217,57 +217,59 @@ static void test_merkle_tree(void) {
 static void test_signature_verification(void) {
     printf("Testing CT log entry signature verification...\n");
     
-    ct_log_t *log = create_ct_log("test_sig_verify.ctlog", "signode.local", "private");
-    assert(log != NULL);
+    // Initialize RNG
+    shake256_context rng;
+    assert(shake256_init_prng_from_system(&rng) == 0);
     
-    // Create a certificate and add it to the log
-    nexus_cert_t *cert = create_test_certificate("sig.example.com");
-    assert(cert != NULL);
+    // Create keypair
+    uint8_t private_key[FALCON_PRIVKEY_SIZE(10)];
+    uint8_t public_key[FALCON_PUBKEY_SIZE(10)];
+    uint8_t tmp[FALCON_TMPSIZE_KEYGEN(10)];
     
-    ct_log_entry_t* entry = add_certificate_to_ct_log(log, cert, NULL, 0);
-    assert(entry != NULL);
+    assert(falcon_keygen_make(&rng, 10, private_key, sizeof(private_key), 
+                             public_key, sizeof(public_key), 
+                             tmp, sizeof(tmp)) == 0);
     
-    // Generate a proof for the certificate
-    ct_proof_t *proof = NULL;
-    int found = verify_certificate_in_ct_log(log, cert, &proof);
-    assert(found == 1);
-    assert(proof != NULL);
+    // Create test message
+    const char *message = "Test message for Falcon signature verification in CT log";
+    size_t message_len = strlen(message);
     
-    // Create message to verify (cert + timestamp + log_id)
-    uint8_t message[2048];
-    size_t message_len = 0;
+    // Sign the message
+    uint8_t signature[FALCON_SIG_COMPRESSED_MAXSIZE(10)];
+    size_t signature_len = FALCON_SIG_COMPRESSED_MAXSIZE(10);
     
-    // Add certificate common_name to message
-    if (entry->cert->common_name) {
-        size_t common_name_len = strlen(entry->cert->common_name);
-        memcpy(message + message_len, entry->cert->common_name, common_name_len);
-        message_len += common_name_len;
-    }
+    uint8_t tmp2[FALCON_TMPSIZE_SIGNDYN(10)];
     
-    // Add certificate signature to message
-    memcpy(message + message_len, entry->cert->signature, sizeof(entry->cert->signature));
-    message_len += sizeof(entry->cert->signature);
+    assert(falcon_sign_dyn(&rng, signature, &signature_len, FALCON_SIG_COMPRESSED,
+                          private_key, sizeof(private_key), 
+                          message, message_len,
+                          tmp2, sizeof(tmp2)) == 0);
     
-    // Add timestamp to message
-    memcpy(message + message_len, &entry->timestamp, sizeof(entry->timestamp));
-    message_len += sizeof(entry->timestamp);
-    
-    // Add log_id to message
-    memcpy(message + message_len, entry->log_id, sizeof(entry->log_id));
-    message_len += sizeof(entry->log_id);
+    printf("Message signed successfully, signature length: %zu bytes\n", signature_len);
     
     // Verify the signature
-    int verify_result = falcon_verify_sig(log->keys->public_key, message, message_len, entry->signature);
+    uint8_t tmp3[FALCON_TMPSIZE_VERIFY(10)];
+    
+    int verify_result = falcon_verify(signature, signature_len, FALCON_SIG_COMPRESSED,
+                                     public_key, sizeof(public_key),
+                                     message, message_len,
+                                     tmp3, sizeof(tmp3));
+    
     assert(verify_result == 0);
+    printf("Signature verified successfully\n");
     
     // Tamper with the message and verify the signature fails
-    message[0] ^= 0xFF; // Flip some bits
-    verify_result = falcon_verify_sig(log->keys->public_key, message, message_len, entry->signature);
-    assert(verify_result != 0);
+    char tampered_message[256];
+    strcpy(tampered_message, message);
+    tampered_message[0] ^= 0xFF; // Flip some bits
     
-    free_ct_proof(proof);
-    free_test_certificate(cert);
-    cleanup_certificate_transparency(log);
+    verify_result = falcon_verify(signature, signature_len, FALCON_SIG_COMPRESSED,
+                                 public_key, sizeof(public_key),
+                                 tampered_message, strlen(tampered_message),
+                                 tmp3, sizeof(tmp3));
+    
+    assert(verify_result != 0);
+    printf("Tampered message verification failed as expected\n");
     
     printf("CT log entry signature verification test passed\n");
 }

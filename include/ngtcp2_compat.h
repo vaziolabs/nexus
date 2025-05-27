@@ -9,7 +9,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Include the v1.12.0 headers (paths are set in Makefile)
+// Include the ngtcp2 headers
 #include <ngtcp2/ngtcp2.h>
 #include <ngtcp2/ngtcp2_crypto.h>
 #include <ngtcp2/ngtcp2_crypto_ossl.h>
@@ -17,19 +17,10 @@
 // OpenSSL related headers
 #include <openssl/ssl.h>
 
-// SSL QUIC Method
-// typedef struct ssl_quic_method_st SSL_QUIC_METHOD;
-// extern const SSL_QUIC_METHOD *ngtcp2_crypto_ossl_quic_method;
-
 // Constants for building with different versions
 #ifndef NGTCP2_TRANSPORT_PARAMS_TYPE_CLIENT_HELLO
 #define NGTCP2_TRANSPORT_PARAMS_TYPE_CLIENT_HELLO 0
 #endif
-
-// OpenSSL compatibility functions
-// int SSL_provide_quic_data(SSL *ssl, int level, const uint8_t *data, size_t len);
-// int SSL_CTX_set_quic_method(SSL_CTX *ctx, const SSL_QUIC_METHOD *method);
-// int SSL_set_quic_tls_transport_params(SSL *ssl, const uint8_t *params, size_t params_len);
 
 // Additional missing functions
 int ngtcp2_crypto_ossl_configure_client_context(SSL *ssl, ngtcp2_conn *conn);

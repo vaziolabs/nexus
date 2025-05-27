@@ -8,9 +8,9 @@
 #include "test_certificate_authority.h"
 #include "test_network_context.h"
 
-// External function declarations for standalone integration tests
-// These are defined in their respective test files
-int test_quic_handshake_main(int argc, char *argv[]);
+// External function declarations for standalone tests
+int test_standalone_ca_main(int argc, char *argv[]);
+int test_standalone_ct_main(int argc, char *argv[]);
 int test_quic_dns_cert_integration_main(int argc, char *argv[]);
 
 // Function declarations for test suite initializers
@@ -35,7 +35,6 @@ void print_help(void) {
     printf("  nexus_tests ct               Run only Certificate Transparency tests\n");
     printf("  nexus_tests ca               Run only Certificate Authority tests\n");
     printf("  nexus_tests network          Run only Network Context tests\n");
-    printf("  nexus_tests quic             Run QUIC handshake test\n");
     printf("  nexus_tests quic_dns_cert    Run QUIC handshake with DNS and certificate validation test\n");
     printf("  nexus_tests integration      Run all integration tests\n");
     printf("  nexus_tests help             Show this help message\n");
@@ -50,7 +49,6 @@ int main(int argc, char *argv[]) {
     int run_ct = 1;
     int run_ca = 1;
     int run_network = 1;
-    int run_quic_handshake = 0; // Off by default as it requires server setup
     int run_quic_dns_cert = 0;  // Off by default as it requires server setup
     int run_unit_tests_only = 0;
     int run_integration_tests_only = 0;
@@ -74,8 +72,6 @@ int main(int argc, char *argv[]) {
             run_ca = 1;
         } else if (strcmp(argv[1], "network") == 0) {
             run_network = 1;
-        } else if (strcmp(argv[1], "quic") == 0) {
-            run_quic_handshake = 1;
         } else if (strcmp(argv[1], "quic_dns_cert") == 0) {
             run_quic_dns_cert = 1;
         } else if (strcmp(argv[1], "unit") == 0) {
@@ -83,7 +79,7 @@ int main(int argc, char *argv[]) {
             run_tld = run_packet = run_config = run_cli = run_ct = run_ca = run_network = 1;
         } else if (strcmp(argv[1], "integration") == 0) {
             run_integration_tests_only = 1;
-            run_quic_handshake = run_quic_dns_cert = 1;
+            run_quic_dns_cert = 1;
         } else if (strcmp(argv[1], "help") == 0) {
             print_help();
             return 0;
@@ -148,19 +144,6 @@ int main(int argc, char *argv[]) {
     
     // Run integration tests
     if (!run_unit_tests_only) {
-        // Run QUIC handshake test
-        if (run_quic_handshake) {
-            printf(COLOR_YELLOW "\n>>> Testing QUIC Handshake with Falcon Certificates <<<\n" COLOR_RESET);
-            char *test_argv[] = {"test_quic_handshake"};
-            result = test_quic_handshake_main(1, test_argv);
-            if (result != 0) {
-                printf(COLOR_RED "QUIC handshake test failed\n" COLOR_RESET);
-                success = 0;
-            } else {
-                printf(COLOR_GREEN "QUIC handshake test passed\n" COLOR_RESET);
-            }
-        }
-        
         // Run QUIC handshake with DNS and certificate validation test
         if (run_quic_dns_cert) {
             printf(COLOR_YELLOW "\n>>> Testing QUIC Handshake with DNS Resolution and Falcon Certificate Validation <<<\n" COLOR_RESET);

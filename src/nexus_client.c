@@ -145,7 +145,10 @@ static int client_recv_crypto_data(ngtcp2_conn *conn, ngtcp2_encryption_level en
                                  uint64_t offset, const uint8_t *data, size_t datalen,
                                  void *user_data) {
     nexus_client_config_t *config = (nexus_client_config_t *)user_data;
-    
+    (void)conn;
+    (void)offset;
+    (void)data;
+
     if (!config || !config->crypto_ctx || !config->crypto_ctx->ssl) {
         dlog("ERROR: Client received crypto data but crypto context is not initialized");
         return NGTCP2_ERR_CALLBACK_FAILURE;

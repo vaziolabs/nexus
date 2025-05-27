@@ -30,6 +30,8 @@ typedef struct {
     nexus_cert_t *cert;
     network_context_t *net_ctx;
     nexus_server_crypto_ctx *crypto_ctx;
+    int handshake_completed; // Flag to track if QUIC handshake has completed
+    int cert_verified;       // Flag to track if Falcon certificate verification succeeded
     // Other server config fields
 } nexus_server_config_t;
 

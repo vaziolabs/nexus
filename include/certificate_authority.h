@@ -8,6 +8,21 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include "network_context.h"  // For network_context_t definition
+#include "extern/falcon/falcon.h"  // Include Falcon header directly
+
+/**
+ * @file certificate_authority.h
+ * @brief Certificate Authority functionality for Stoq using Falcon post-quantum cryptography
+ * 
+ * This file provides the functionality for managing certificates in the Stoq network,
+ * including certificate creation, signing, verification, and management. It uses
+ * Falcon post-quantum cryptography for key generation and signature operations.
+ * 
+ * Falcon is a post-quantum digital signature algorithm based on NTRU lattices.
+ * It's designed to be resistant to quantum computer attacks, while maintaining
+ * reasonable key and signature sizes. The implementation here uses Falcon-1024,
+ * which provides 256 bits of quantum security.
+ */
 
 // Certificate types
 typedef enum {
@@ -18,15 +33,14 @@ typedef enum {
 
 // Falcon-1024 key structure
 typedef struct {
-    uint8_t public_key[1793];  // Falcon-1024 public key size
-    uint8_t private_key[2305]; // Falcon-1024 private key size
-    uint8_t signature[1330];   // Falcon-1024 signature size
+    uint8_t public_key[FALCON_PUBKEY_SIZE(10)];  // Falcon-1024 public key size
+    uint8_t private_key[FALCON_PRIVKEY_SIZE(10)]; // Falcon-1024 private key size
 } falcon_keys_t;
 
 // Certificate structure
 struct nexus_cert {
     char *common_name;
-    uint8_t signature[1330];   // Falcon-1024 signature
+    uint8_t signature[FALCON_SIG_COMPRESSED_MAXSIZE(10)];   // Falcon-1024 compressed signature
     uint64_t valid_from;
     uint64_t valid_until;
     cert_type_t cert_type;
