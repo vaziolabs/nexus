@@ -6,6 +6,7 @@
 #include <openssl/ssl.h>
 #include "certificate_authority.h"
 #include "network_context.h"
+#include <pthread.h>
 
 // Forward declaration of connection reference struct
 typedef struct {
@@ -32,6 +33,12 @@ typedef struct {
     nexus_server_crypto_ctx *crypto_ctx;
     int handshake_completed; // Flag to track if QUIC handshake has completed
     int cert_verified;       // Flag to track if Falcon certificate verification succeeded
+    
+    // Added fields for new crypto and connection management logic
+    pthread_mutex_t lock;             // Mutex for synchronizing access to shared server resources
+    ngtcp2_callbacks callbacks;       // Store ngtcp2 callbacks
+    ngtcp2_settings settings;         // Store ngtcp2 settings
+
     // Other server config fields
 } nexus_server_config_t;
 

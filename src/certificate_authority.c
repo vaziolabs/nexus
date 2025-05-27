@@ -404,3 +404,8 @@ void cleanup_certificate_authority(ca_context_t *ca_ctx) {
     
     free(ca_ctx);
 }
+
+// Alias cleanup_certificate_authority as free_ca_context for compatibility
+void free_ca_context(ca_context_t *ca_ctx) {
+    cleanup_certificate_authority(ca_ctx);
+}

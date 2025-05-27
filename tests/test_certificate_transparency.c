@@ -85,14 +85,14 @@ static void test_ct_log_creation(void) {
     int public_key_has_value = 0;
     int private_key_has_value = 0;
     
-    for (int i = 0; i < sizeof(log->keys->public_key); i++) {
+    for (int i = 0; i < (int)sizeof(log->keys->public_key); i++) {
         if (log->keys->public_key[i] != 0) {
             public_key_has_value = 1;
             break;
         }
     }
     
-    for (int i = 0; i < sizeof(log->keys->private_key); i++) {
+    for (int i = 0; i < (int)sizeof(log->keys->private_key); i++) {
         if (log->keys->private_key[i] != 0) {
             private_key_has_value = 1;
             break;
@@ -122,7 +122,7 @@ static void test_certificate_operations(void) {
     
     // Verify entry signature (not all zeros)
     int signature_has_value = 0;
-    for (int i = 0; i < sizeof(entry->signature); i++) {
+    for (int i = 0; i < (int)sizeof(entry->signature); i++) {
         if (entry->signature[i] != 0) {
             signature_has_value = 1;
             break;
@@ -290,14 +290,14 @@ static void test_network_context_integration(void) {
     int public_key_has_value = 0;
     int private_key_has_value = 0;
     
-    for (int i = 0; i < sizeof(log->keys->public_key); i++) {
+    for (int i = 0; i < (int)sizeof(log->keys->public_key); i++) {
         if (log->keys->public_key[i] != 0) {
             public_key_has_value = 1;
             break;
         }
     }
     
-    for (int i = 0; i < sizeof(log->keys->private_key); i++) {
+    for (int i = 0; i < (int)sizeof(log->keys->private_key); i++) {
         if (log->keys->private_key[i] != 0) {
             private_key_has_value = 1;
             break;

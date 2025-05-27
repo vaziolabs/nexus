@@ -1,15 +1,42 @@
 #!/bin/bash
 
 # Determine pkg-config command
-PKG_CONFIG := $(shell command -v pkgconf >/dev/null 2>&1 && echo "pkgconf" || echo "pkg-config")
-PKG_NAME_NGTCP2 := $(shell command -v pkgconf >/dev/null 2>&1 && echo "libngtcp2" || echo "ngtcp2")
+PKG_CONFIG := pkg-config
+PKG_NAME_NGTCP2 := libngtcp2
 
 # Compiler and flags
 CC := gcc
-CFLAGS := -Wall -Wextra -g -O2 -D_GNU_SOURCE -I. -I./include -I./include/extern/libngtcp2/lib/includes -I./include/extern/libngtcp2/crypto/includes -I./include/extern/falcon $(shell $(PKG_CONFIG) --cflags $(PKG_NAME_NGTCP2)) -DNGTCP2_ENABLE_STREAM_API
+CFLAGS := -Wall -Wextra -g -O2 -D_GNU_SOURCE -I. -I./include $(shell $(PKG_CONFIG) --cflags $(PKG_NAME_NGTCP2)) $(shell pkg-config --cflags openssl) -DNGTCP2_ENABLE_STREAM_API -DDEBUG
+# Add general include paths for ngtcp2 lib and crypto (headers in crypto/includes should be general)
+# These paths for the local submodule should take precedence.
+CFLAGS += -I./include/extern/libngtcp2/lib/includes -I./include/extern/libngtcp2/crypto/includes -I./include/extern/falcon
 
 # Store pkg-config output for libs separately
 PKG_CONFIG_LIBS := $(shell $(PKG_CONFIG) --libs $(PKG_NAME_NGTCP2))
+
+# ngtcp2 library paths and specific library flags
+LIBNGTCP2_PATH := $(CURDIR)/include/extern/libngtcp2/lib
+LIBNGTCP2_CRYPTO_PATH := $(CURDIR)/include/extern/libngtcp2/crypto
+
+# Define common ngtcp2 library linker flags
+LIBNGTCP2_CORE_FLAGS := -L$(LIBNGTCP2_PATH)/.libs -lngtcp2
+
+# Define crypto backend specific flags - USE OSSL
+LIBNGTCP2_CRYPTO_BACKEND_FLAGS := -L$(LIBNGTCP2_CRYPTO_PATH)/ossl/.libs -lngtcp2_crypto_ossl
+# LIBNGTCP2_CRYPTO_BACKEND_FLAGS := -L$(LIBNGTCP2_CRYPTO_PATH)/quictls/.libs -lngtcp2_crypto_quictls
+
+# Combine all ngtcp2 related lib flags
+NGTCP2_LIBS_COMBINED := $(LIBNGTCP2_CORE_FLAGS) $(LIBNGTCP2_CRYPTO_BACKEND_FLAGS)
+
+# General libraries
+OPENSSL_LIBS := $(shell pkg-config --libs openssl)
+PTHREAD_LIBS := -lpthread
+MATH_LIBS := -lm
+FALCON_LIBS := $(addprefix $(BUILD_DIR)/, $(FALCON_OBJS))
+
+# Aggregate libraries for main executable and CLI
+NEXUS_LIBS := $(NGTCP2_LIBS_COMBINED) $(OPENSSL_LIBS) $(PTHREAD_LIBS) $(MATH_LIBS) $(FALCON_LIBS) -luuid
+CLI_LIBS := $(NGTCP2_LIBS_COMBINED) $(OPENSSL_LIBS) $(PTHREAD_LIBS) $(MATH_LIBS) $(FALCON_LIBS) -luuid
 
 # Libraries: ensure -lngtcp2 is present and other system libs
 LIBS := $(PKG_CONFIG_LIBS) -lpthread -lssl -lcrypto -lrt -lngtcp2_crypto_ossl -luuid
@@ -23,9 +50,6 @@ TESTS_DIR := tests
 # Add Falcon source files
 FALCON_SRCS := falcon.c shake.c codec.c common.c fft.c fpr.c keygen.c rng.c sign.c vrfy.c
 FALCON_OBJS := $(patsubst %.c,$(BUILD_DIR)/falcon/%.o,$(FALCON_SRCS))
-
-# Linker flags (LDFLAGS is often used for -L paths if needed, but LIBS handles -l flags)
-LDFLAGS :=
 
 # Source files and objects
 SRCS := $(wildcard $(SRC_DIR)/*.c)
@@ -81,18 +105,18 @@ $(BUILD_DIR)/falcon/%.o: include/extern/falcon/%.c
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 # Link the program
-$(TARGET): $(BUILD_DIR) $(COMMON_OBJS) $(BUILD_DIR)/main.o $(FALCON_OBJS)
+$(TARGET): $(BUILD_DIR) $(BUILD_DIR)/main.o $(COMMON_OBJS) $(FALCON_OBJS)
 	@echo "Linking $(TARGET)..."
-	@$(CC) $(LDFLAGS) $(BUILD_DIR)/main.o $(COMMON_OBJS) $(FALCON_OBJS) $(LIBS) -o $(TARGET)
+	@$(CC) $(CFLAGS) $(BUILD_DIR)/main.o $(COMMON_OBJS) $(FALCON_OBJS) -o $(TARGET) $(NEXUS_LIBS)
 	@echo "Build successful!"
 	@echo "Binary location: $(TARGET)"
 	@echo "Usage example: $(TARGET) --mode private --hostname localhost --server localhost"
 	@echo "CLI usage: $(TARGET) cli help"
 
 # Link the CLI program
-$(CLI_TARGET): $(BUILD_DIR) $(COMMON_OBJS) $(BUILD_DIR)/nexus_cli.o $(FALCON_OBJS)
+$(CLI_TARGET): $(BUILD_DIR) $(BUILD_DIR)/nexus_cli.o $(COMMON_OBJS) $(FALCON_OBJS)
 	@echo "Linking $(CLI_TARGET)..."
-	@$(CC) $(LDFLAGS) $(BUILD_DIR)/nexus_cli.o $(COMMON_OBJS) $(FALCON_OBJS) $(LIBS) -o $(CLI_TARGET)
+	@$(CC) $(CFLAGS) $(BUILD_DIR)/nexus_cli.o $(COMMON_OBJS) $(FALCON_OBJS) -o $(CLI_TARGET) $(CLI_LIBS)
 	@echo "CLI build successful!"
 	@echo "Binary location: $(CLI_TARGET)"
 	@echo "Usage example: $(CLI_TARGET) help"
@@ -156,7 +180,7 @@ help:
 	@echo "  integration_test - Run the full integration test suite"
 
 # Phony targets
-.PHONY: all check_deps clean deps help test test_handshake test_ipv6 test_tld test_packet test_config test_cli test_ct test_ca test_network integration_test test_falcon_verify
+.PHONY: all check_deps clean deps help test test_handshake test_ipv6 test_tld test_packet test_config test_cli test_ct test_ca test_network integration_test test_standalone_ca test_standalone_ct test_falcon_verify list_includes
 
 # Build will stop if any command fails
 .DELETE_ON_ERROR:
@@ -170,7 +194,7 @@ help:
 # Moved these definitions before their first use in $(TEST_TARGET)
 # Filter out standalone test files from the main test suite sources
 ALL_TEST_CSRCS := $(wildcard $(TESTS_DIR)/*.c)
-STANDALONE_TEST_CSRCS := $(TESTS_DIR)/test_quic_handshake.c $(TESTS_DIR)/test_ipv6_quic_handshake.c $(TESTS_DIR)/test_falcon_verify.c
+STANDALONE_TEST_CSRCS := $(TESTS_DIR)/test_quic_handshake.c $(TESTS_DIR)/test_ipv6_quic_handshake.c $(TESTS_DIR)/test_falcon_verify.c $(TESTS_DIR)/standalone_ca_test.c $(TESTS_DIR)/standalone_ct_test.c
 TEST_SUITE_CSRCS := $(filter-out $(STANDALONE_TEST_CSRCS), $(ALL_TEST_CSRCS))
 
 TEST_SUITE_OBJS := $(TEST_SUITE_CSRCS:$(TESTS_DIR)/%.c=$(BUILD_DIR)/%.o)
@@ -186,21 +210,21 @@ $(BUILD_DIR)/%.o: $(TESTS_DIR)/%.c
 # Link the test executable (nexus_tests)
 $(TEST_TARGET): $(BUILD_DIR) $(SRC_OBJS_FOR_TESTS) $(TEST_SUITE_OBJS) $(FALCON_OBJS)
 	@echo "Linking $(TEST_TARGET)..."
-	@$(CC) $(LDFLAGS) $(SRC_OBJS_FOR_TESTS) $(TEST_SUITE_OBJS) $(FALCON_OBJS) $(LIBS) -o $(TEST_TARGET)
+	@$(CC) $(CFLAGS) $(SRC_OBJS_FOR_TESTS) $(TEST_SUITE_OBJS) $(FALCON_OBJS) -o $(TEST_TARGET) $(NEXUS_LIBS)
 	@echo "Test build successful!"
 	@echo "Test binary location: $(TEST_TARGET)"
 
 # Link the handshake test executable
 $(HANDSHAKE_TEST_TARGET): $(BUILD_DIR) $(BUILD_DIR)/test_quic_handshake.o $(SRC_OBJS_FOR_TESTS) $(FALCON_OBJS)
 	@echo "Linking $(HANDSHAKE_TEST_TARGET)..."
-	@$(CC) $(LDFLAGS) $(BUILD_DIR)/test_quic_handshake.o $(SRC_OBJS_FOR_TESTS) $(FALCON_OBJS) $(LIBS) -o $(HANDSHAKE_TEST_TARGET)
+	@$(CC) $(CFLAGS) $(BUILD_DIR)/test_quic_handshake.o $(SRC_OBJS_FOR_TESTS) $(FALCON_OBJS) -o $(HANDSHAKE_TEST_TARGET) $(NEXUS_LIBS)
 	@echo "Handshake test build successful!"
 	@echo "Test binary location: $(HANDSHAKE_TEST_TARGET)"
 
 # Link the IPv6 handshake test executable
 $(IPV6_HANDSHAKE_TEST_TARGET): $(BUILD_DIR) $(BUILD_DIR)/test_ipv6_quic_handshake.o $(SRC_OBJS_FOR_TESTS) $(FALCON_OBJS)
 	@echo "Linking $(IPV6_HANDSHAKE_TEST_TARGET)..."
-	@$(CC) $(LDFLAGS) $(BUILD_DIR)/test_ipv6_quic_handshake.o $(SRC_OBJS_FOR_TESTS) $(FALCON_OBJS) $(LIBS) -o $(IPV6_HANDSHAKE_TEST_TARGET)
+	@$(CC) $(CFLAGS) $(BUILD_DIR)/test_ipv6_quic_handshake.o $(SRC_OBJS_FOR_TESTS) $(FALCON_OBJS) -o $(IPV6_HANDSHAKE_TEST_TARGET) $(NEXUS_LIBS)
 	@echo "IPv6 handshake test build successful!"
 	@echo "Test binary location: $(IPV6_HANDSHAKE_TEST_TARGET)"
 
@@ -256,9 +280,40 @@ integration_test: all
 	@chmod +x $(INTEGRATION_TEST_SCRIPT)
 	@$(INTEGRATION_TEST_SCRIPT)
 
-# Test Falcon verification
-test_falcon_verify: $(BUILD_DIR)
-	@echo "Compiling Falcon verification test..."
-	@$(CC) $(CFLAGS) -o $(BUILD_DIR)/test_falcon_verify tests/test_falcon_verify.c $(FALCON_OBJS) $(LIBS)
-	@echo "Running Falcon verification test..."
-	@./$(BUILD_DIR)/test_falcon_verify
+# Individual standalone test targets
+build/standalone_ca_test: $(BUILD_DIR)/standalone_ca_test.o $(SRC_OBJS_FOR_TESTS) $(FALCON_OBJS)
+	@echo "Linking $@..."
+	@$(CC) $(CFLAGS) $(BUILD_DIR)/standalone_ca_test.o $(BUILD_DIR)/certificate_authority.o $(BUILD_DIR)/debug.o $(FALCON_OBJS) $(LIBS) -o $@
+
+build/standalone_ct_test: $(BUILD_DIR)/standalone_ct_test.o $(SRC_OBJS_FOR_TESTS) $(FALCON_OBJS)
+	@echo "Linking $@..."
+	@$(CC) $(CFLAGS) $(BUILD_DIR)/standalone_ct_test.o $(BUILD_DIR)/certificate_authority.o $(BUILD_DIR)/certificate_transparency.o $(BUILD_DIR)/debug.o $(FALCON_OBJS) $(LIBS) -lpthread -o $@
+
+build/test_falcon_verify: $(BUILD_DIR)/test_falcon_verify.o $(FALCON_OBJS)
+	@echo "Linking $@..."
+	@$(CC) $(CFLAGS) $(BUILD_DIR)/test_falcon_verify.o $(FALCON_OBJS) $(LIBS) -o $@
+
+# Run standalone tests
+test_standalone_ca: build/standalone_ca_test
+	@echo "Running standalone CA test..."
+	@./build/standalone_ca_test
+
+test_standalone_ct: build/standalone_ct_test
+	@echo "Running standalone CT test..."
+	@./build/standalone_ct_test
+
+test_falcon_verify: build/test_falcon_verify
+	@echo "Running Falcon verify test..."
+	@./build/test_falcon_verify
+
+# Target to list includes for a specific file (e.g., nexus_client.c)
+list_includes: $(BUILD_DIR)/nexus_client.o # Ensure object is built as part of this if not present
+	@echo "Ngtcp2 headers included by nexus_client.c:"
+	@$(CC) $(CFLAGS) -E -H $(SRC_DIR)/nexus_client.c 2>&1 | grep -E '^\.+ .*/ngtcp2/.*\\.h' | sort -u
+	@echo "Compilation of nexus_client.o will proceed if not already done by dependency."
+
+# Modify the rule for nexus_client.o to also show includes (optional, list_includes target is more direct)
+# $(BUILD_DIR)/nexus_client.o: $(SRC_DIR)/nexus_client.c
+# 	@echo "Compiling $< and listing NGTCP2 includes..."
+# 	@$(CC) $(CFLAGS) -E -H $< 2>&1 | grep -E '^\\.+ .*/ngtcp2/.*\\.h' | sort -u || true
+# 	@$(CC) $(CFLAGS) -c $< -o $@

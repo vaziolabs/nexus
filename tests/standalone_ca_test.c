@@ -6,7 +6,7 @@
 #include "../include/network_context.h"
 #include "../include/system.h"
 
-int test_standalone_ca_main(int argc, char *argv[]) {
+int main(int argc, char *argv[]) {
     (void)argc;
     (void)argv;
     

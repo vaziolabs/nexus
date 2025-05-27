@@ -30,14 +30,14 @@ static void test_ca_initialization(void) {
     int public_key_has_value = 0;
     int private_key_has_value = 0;
     
-    for (int i = 0; i < sizeof(ca_ctx->keys->public_key); i++) {
+    for (int i = 0; i < (int)sizeof(ca_ctx->keys->public_key); i++) {
         if (ca_ctx->keys->public_key[i] != 0) {
             public_key_has_value = 1;
             break;
         }
     }
     
-    for (int i = 0; i < sizeof(ca_ctx->keys->private_key); i++) {
+    for (int i = 0; i < (int)sizeof(ca_ctx->keys->private_key); i++) {
         if (ca_ctx->keys->private_key[i] != 0) {
             private_key_has_value = 1;
             break;
@@ -57,7 +57,7 @@ static void test_ca_initialization(void) {
     
     // Verify CA certificate signature (not all zeros)
     int signature_has_value = 0;
-    for (int i = 0; i < sizeof(ca_ctx->ca_cert->signature); i++) {
+    for (int i = 0; i < (int)sizeof(ca_ctx->ca_cert->signature); i++) {
         if (ca_ctx->ca_cert->signature[i] != 0) {
             signature_has_value = 1;
             break;
@@ -107,7 +107,7 @@ static void test_certificate_request(void) {
     
     // Verify signature (not all zeros)
     int signature_has_value = 0;
-    for (int i = 0; i < sizeof(cert->signature); i++) {
+    for (int i = 0; i < (int)sizeof(cert->signature); i++) {
         if (cert->signature[i] != 0) {
             signature_has_value = 1;
             break;
@@ -195,14 +195,14 @@ static void test_falcon_keypair_generation(void) {
     int public_key_has_value = 0;
     int private_key_has_value = 0;
     
-    for (int i = 0; i < sizeof(public_key); i++) {
+    for (int i = 0; i < (int)sizeof(public_key); i++) {
         if (public_key[i] != 0) {
             public_key_has_value = 1;
             break;
         }
     }
     
-    for (int i = 0; i < sizeof(private_key); i++) {
+    for (int i = 0; i < (int)sizeof(private_key); i++) {
         if (private_key[i] != 0) {
             private_key_has_value = 1;
             break;

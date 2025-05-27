@@ -18,14 +18,18 @@ int main(void) {
     uint8_t public_key[FALCON_PUBKEY_SIZE(10)];
     uint8_t tmp[FALCON_TMPSIZE_KEYGEN(10)];
     
-    if (falcon_keygen_make(&rng, 10, private_key, sizeof(private_key), 
+    printf("Generating keypair...\n");
+    int ret = falcon_keygen_make(&rng, 10, private_key, sizeof(private_key), 
                           public_key, sizeof(public_key), 
-                          tmp, sizeof(tmp)) != 0) {
-        printf("Failed to generate keypair\n");
+                          tmp, sizeof(tmp));
+    if (ret != 0) {
+        printf("Failed to generate keypair with error code %d\n", ret);
         return 1;
     }
     
     printf("Keypair generated successfully\n");
+    printf("Public key starts with: 0x%02x 0x%02x 0x%02x...\n", 
+           public_key[0], public_key[1], public_key[2]);
     
     // Message to sign
     const char *message = "Test message for Falcon";
@@ -37,26 +41,31 @@ int main(void) {
     
     uint8_t tmp2[FALCON_TMPSIZE_SIGNDYN(10)];
     
-    if (falcon_sign_dyn(&rng, signature, &signature_len, FALCON_SIG_COMPRESSED,
+    printf("Signing message...\n");
+    ret = falcon_sign_dyn(&rng, signature, &signature_len, FALCON_SIG_COMPRESSED,
                        private_key, sizeof(private_key), 
                        message, message_len,
-                       tmp2, sizeof(tmp2)) != 0) {
-        printf("Failed to sign message\n");
+                       tmp2, sizeof(tmp2));
+    if (ret != 0) {
+        printf("Failed to sign message with error code %d\n", ret);
         return 1;
     }
     
     printf("Message signed successfully, signature length: %zu\n", signature_len);
+    printf("Signature starts with: 0x%02x 0x%02x 0x%02x...\n", 
+           signature[0], signature[1], signature[2]);
     
     // Verify the signature
     uint8_t tmp3[FALCON_TMPSIZE_VERIFY(10)];
     
-    int result = falcon_verify(signature, signature_len, FALCON_SIG_COMPRESSED,
-                              public_key, sizeof(public_key),
-                              message, message_len,
-                              tmp3, sizeof(tmp3));
+    printf("Verifying signature...\n");
+    ret = falcon_verify(signature, signature_len, FALCON_SIG_COMPRESSED,
+                       public_key, sizeof(public_key),
+                       message, message_len,
+                       tmp3, sizeof(tmp3));
     
-    if (result != 0) {
-        printf("Signature verification failed with code %d\n", result);
+    if (ret != 0) {
+        printf("Signature verification failed with code %d\n", ret);
         return 1;
     }
     
@@ -66,17 +75,18 @@ int main(void) {
     const char *tampered = "Tampered message for Falcon";
     size_t tampered_len = strlen(tampered);
     
-    result = falcon_verify(signature, signature_len, FALCON_SIG_COMPRESSED,
-                          public_key, sizeof(public_key),
-                          tampered, tampered_len,
-                          tmp3, sizeof(tmp3));
+    printf("Verifying with tampered message (should fail)...\n");
+    ret = falcon_verify(signature, signature_len, FALCON_SIG_COMPRESSED,
+                       public_key, sizeof(public_key),
+                       tampered, tampered_len,
+                       tmp3, sizeof(tmp3));
     
-    if (result == 0) {
+    if (ret == 0) {
         printf("ERROR: Tampered message verification should have failed\n");
         return 1;
     }
     
-    printf("Tampered message verification failed as expected\n");
+    printf("Tampered message verification failed as expected with code %d\n", ret);
     
     printf("All tests passed\n");
     return 0;

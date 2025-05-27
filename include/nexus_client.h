@@ -38,6 +38,11 @@ typedef struct {
     network_context_t* net_ctx;
     int64_t next_stream_id; // Keep for reference, but open_bidi_stream manages IDs
     nexus_crypto_ctx *crypto_ctx; // TLS crypto context
+    int handshake_completed;  // Flag to indicate if handshake has completed
+
+    // Added fields for new crypto and connection management logic
+    ngtcp2_callbacks callbacks;       // Store ngtcp2 callbacks
+    ngtcp2_settings settings;         // Store ngtcp2 settings
 } nexus_client_config_t;
 
 // Update function declaration to match implementation

@@ -10,14 +10,16 @@
 
 // Forward declarations for static helper functions
 static int write_uint8(uint8_t val, uint8_t* buf, size_t buf_len, size_t* offset);
-static int write_uint16(uint16_t val, uint8_t* buf, size_t buf_len, size_t* offset);
+// Unused function - commented out to eliminate warning
+//static int write_uint16(uint16_t val, uint8_t* buf, size_t buf_len, size_t* offset);
 static int write_uint32(uint32_t val, uint8_t* buf, size_t buf_len, size_t* offset);
 static int write_uint64(uint64_t val, uint8_t* buf, size_t buf_len, size_t* offset);
 static int write_fixed_string(const char* str, size_t str_fixed_len, uint8_t* buf, size_t buf_len, size_t* offset);
 static int write_bytes(const uint8_t* data, uint32_t data_len, uint8_t* buf, size_t buf_len, size_t* offset);
 
 static int read_uint8(const uint8_t* buf, size_t buf_len, size_t* offset, uint8_t* out_val);
-static int read_uint16(const uint8_t* buf, size_t buf_len, size_t* offset, uint16_t* out_val);
+// Unused function - commented out to eliminate warning
+//static int read_uint16(const uint8_t* buf, size_t buf_len, size_t* offset, uint16_t* out_val);
 static int read_uint32(const uint8_t* buf, size_t buf_len, size_t* offset, uint32_t* out_val);
 static int read_uint64(const uint8_t* buf, size_t buf_len, size_t* offset, uint64_t* out_val);
 static int read_fixed_string(const uint8_t* buf, size_t buf_len, size_t* offset, char* out_str, size_t str_fixed_len);
@@ -32,6 +34,7 @@ static int write_uint8(uint8_t val, uint8_t* buf, size_t buf_len, size_t* offset
     return 0;
 }
 
+/* Unused function - commented out to eliminate warning
 // Write a uint16_t to buffer (network byte order) and advance offset
 static int write_uint16(uint16_t val, uint8_t* buf, size_t buf_len, size_t* offset) {
     if (*offset + sizeof(uint16_t) > buf_len) return -1;
@@ -40,6 +43,7 @@ static int write_uint16(uint16_t val, uint8_t* buf, size_t buf_len, size_t* offs
     *offset += sizeof(uint16_t);
     return 0;
 }
+*/
 
 // Write a uint32_t to buffer (network byte order) and advance offset
 static int write_uint32(uint32_t val, uint8_t* buf, size_t buf_len, size_t* offset) {
@@ -53,11 +57,9 @@ static int write_uint32(uint32_t val, uint8_t* buf, size_t buf_len, size_t* offs
 // Write a uint64_t to buffer (network byte order) and advance offset
 static int write_uint64(uint64_t val, uint8_t* buf, size_t buf_len, size_t* offset) {
     if (*offset + sizeof(uint64_t) > buf_len) return -1;
-    // htonll is not standard, so do it manually for portability if needed, or assume compatible systems
-    // For now, direct copy assuming same endian or system handles it (common on x86 for network libs)
-    // Proper portable way: split into bytes or use compiler intrinsics.
-    // Simplification: direct copy for now. For network portable code, use byte-by-byte for uint64_t.
-    uint64_t net_val = val; // Placeholder - proper conversion needed for full portability
+    // For now, just writing uint64_t as is; proper network byte order
+    // would need to be considered for cross-platform consistency
+    uint64_t net_val = val;
     if (htonl(1) != 1) { // Check if system is big-endian; if not, swap for uint64_t manually
         uint8_t* s = (uint8_t*)&val;
         uint8_t* d = (uint8_t*)&net_val;
@@ -104,6 +106,7 @@ static int read_uint8(const uint8_t* buf, size_t buf_len, size_t* offset, uint8_
     return 0;
 }
 
+/* Unused function - commented out to eliminate warning
 static int read_uint16(const uint8_t* buf, size_t buf_len, size_t* offset, uint16_t* out_val) {
     if (*offset + sizeof(uint16_t) > buf_len) return -1;
     uint16_t net_val;
@@ -112,6 +115,7 @@ static int read_uint16(const uint8_t* buf, size_t buf_len, size_t* offset, uint1
     *offset += sizeof(uint16_t);
     return 0;
 }
+*/
 
 static int read_uint32(const uint8_t* buf, size_t buf_len, size_t* offset, uint32_t* out_val) {
     if (*offset + sizeof(uint32_t) > buf_len) return -1;
@@ -499,7 +503,7 @@ ssize_t get_serialized_payload_dns_response_size(const payload_dns_response_t* p
     // Size of status (uint8_t) + size of record_count (uint32_t)
     ssize_t total_size = sizeof(uint8_t) + sizeof(uint32_t);
     for (int i = 0; i < payload->record_count; ++i) {
-        if (!payload->records || !&payload->records[i]) return -1; // Invalid record array or entry
+        if (!payload->records) return -1; // Invalid record array
         ssize_t record_size = get_serialized_dns_record_size(&payload->records[i]);
         if (record_size < 0) return -1; // Error getting size of a record
         total_size += record_size;
@@ -517,7 +521,7 @@ ssize_t serialize_payload_dns_response(const payload_dns_response_t* payload, ui
     if (write_uint32((uint32_t)payload->record_count, out_buf, out_buf_len, &offset) != 0) return -1;
 
     for (int i = 0; i < payload->record_count; ++i) {
-        if (!payload->records || !&payload->records[i]) return -1; // Should not happen if size check passed
+        if (!payload->records) return -1; // Should not happen if size check passed
         size_t record_bytes_written = 0; // To capture bytes written by serialize_dns_record
         if (serialize_dns_record(&payload->records[i], out_buf + offset, out_buf_len - offset, &record_bytes_written) != 0) {
             return -1; // Error serializing a record

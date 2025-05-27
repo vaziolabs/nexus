@@ -82,8 +82,8 @@ int process_cli_command(const cli_command_t *cmd) {
             }
             // Fall back to local implementation if service not available
             dlog("Service not available, using stub implementation for register-tld");
-            printf("Registering TLD '%s'\n", cmd->param2);
-            printf("TLD '%s' registered successfully.\n", cmd->param2);
+            printf("Registering TLD '%s'\n", cmd->profile_name);
+            printf("TLD '%s' registered successfully.\n", cmd->profile_name);
             return 0;
             
         case CLI_CMD_LOOKUP:
@@ -158,38 +158,48 @@ int parse_cli_args(int argc, char **argv, cli_command_t *cmd) {
     if (!cmd || argc < 2) {
         return -1;
     }
-    
+
+    dlog("parse_cli_args: Started. argc=%d", argc);
+    for(int k=0; k<argc; ++k) dlog("parse_cli_args: initial argv[%d] = '%s'", k, argv[k]);
+
     // Initialize command structure
     memset(cmd, 0, sizeof(cli_command_t));
-    
+
     // Process global options first
     int arg_index = 1;
+    dlog("parse_cli_args: Starting option loop. arg_index=%d", arg_index);
     while (arg_index < argc && argv[arg_index][0] == '-') {
+        dlog("parse_cli_args: In option loop. argv[%d] = '%s'", arg_index, argv[arg_index]);
         if (strcmp(argv[arg_index], "--server") == 0) {
-            // Store server address
+            dlog("parse_cli_args: Matched '--server'");
             if (arg_index + 1 < argc) {
                 cmd->param1 = strdup(argv[arg_index + 1]); // Server address
+                dlog("parse_cli_args: Server address (param1) = '%s'", cmd->param1 ? cmd->param1 : "NULL");
                 arg_index += 2;
             } else {
                 fprintf(stderr, "Server address required after --server\n");
                 return -1;
             }
         } else if (strncmp(argv[arg_index], "--server=", 9) == 0) {
-            // Handle --server=value format
+            dlog("parse_cli_args: Matched '--server='");
             cmd->param1 = strdup(argv[arg_index] + 9); // Server address
+            dlog("parse_cli_args: Server address (param1) = '%s'", cmd->param1 ? cmd->param1 : "NULL");
             arg_index++;
         } else {
-            // Unknown option, assume it's a command
-            break;
+            dlog("parse_cli_args: Unknown option '%s', breaking option loop.", argv[arg_index]);
+            break; 
         }
+        dlog("parse_cli_args: End of option loop iteration. arg_index=%d", arg_index);
     }
-    
-    // Check if we've consumed all arguments
+    dlog("parse_cli_args: Option loop finished. arg_index=%d", arg_index);
+
+    // Check if we've consumed all arguments or if no command is present
     if (arg_index >= argc) {
-        fprintf(stderr, "No command specified\n");
+        fprintf(stderr, "No command specified after options\n");
         return -1;
     }
-    
+
+    dlog("parse_cli_args: Expecting command at argv[%d] = '%s'", arg_index, argv[arg_index]);
     // Parse command type
     if (strcmp(argv[arg_index], "help") == 0) {
         cmd->type = CLI_CMD_HELP;
@@ -265,11 +275,21 @@ int parse_cli_args(int argc, char **argv, cli_command_t *cmd) {
         }
     } else if (strcmp(argv[arg_index], "register-tld") == 0) {
         cmd->type = CLI_CMD_REGISTER_TLD;
-        if (arg_index + 2 < argc) { 
+        dlog("parse_cli_args: Matched command 'register-tld'");
+        if (arg_index + 2 < argc) {
             cmd->profile_name = strdup(argv[arg_index + 1]); // Profile name
-            cmd->param1 = strdup(argv[arg_index + 2]);       // TLD name (as per test expectation for param1)
+            cmd->param1 = strdup(argv[arg_index + 2]); // TLD name
+            dlog("parse_cli_args: Profile name = '%s', TLD name (param1) = '%s'", 
+                 cmd->profile_name ? cmd->profile_name : "NULL", 
+                 cmd->param1 ? cmd->param1 : "NULL");
+        } else if (arg_index + 1 < argc) {
+            // For backward compatibility, if only one param is provided, use it as TLD name
+            cmd->profile_name = strdup(argv[arg_index + 1]); // Use TLD name as profile_name for backward compatibility
+            cmd->param1 = strdup(argv[arg_index + 1]); // TLD name
+            dlog("parse_cli_args: TLD name (param1) = '%s', also used as profile_name", 
+                 cmd->param1 ? cmd->param1 : "NULL");
         } else {
-            fprintf(stderr, "Profile name and TLD name required for register-tld\n");
+            fprintf(stderr, "TLD name required for register-tld\n");
             return -1;
         }
     } else if (strcmp(argv[arg_index], "register-domain") == 0) {
@@ -317,11 +337,12 @@ int parse_cli_args(int argc, char **argv, cli_command_t *cmd) {
     } else if (strcmp(argv[arg_index], "configure") == 0) {
         cmd->type = CLI_CMD_CONFIGURE;
     } else {
-        fprintf(stderr, "Unknown command: %s\n", argv[arg_index]);
+        fprintf(stderr, "Error: Unknown command '%s'\n", argv[arg_index]);
+        dlog("parse_cli_args: Failed to match command '%s'", argv[arg_index]);
         return -1;
     }
-    
-    return 0;
+    dlog("parse_cli_args: Successfully parsed command. Type: %d", cmd->type);
+    return 0; // Success
 }
 
 // Connect to the NEXUS service
@@ -788,70 +809,28 @@ void free_cli_command(cli_command_t *cmd) {
     memset(cmd, 0, sizeof(cli_command_t));
 }
 
-int handle_status_command(int argc, char *argv[]) {
-    // Print node status information
-    printf("Nexus Node Status:\n");
-    printf("  State: Active\n");
-    printf("  Mode: %s\n", argc > 2 ? argv[2] : "unknown");
-    printf("  Certificate validated with Falcon: Yes\n");
-    printf("  Falcon certificate details:\n");
-    printf("    - Post-quantum security: Enabled\n");
-    printf("    - Certificate Authority: Trusted\n");
-    printf("    - Certificate Transparency: Verified\n");
-    
-    printf("Status command executed successfully\n");
-    return 0;
-}
-
-int handle_resolve_command(int argc, char *argv[]) {
-    if (argc < 3) {
-        printf("Error: Missing hostname to resolve\n");
-        return 1;
-    }
-    
-    printf("Resolving %s...\n", argv[2]);
-    printf("Resolution successful\n");
-    printf("IP: 127.0.0.1\n");
-    return 0;
-}
-
-int handle_send_command(int argc, char *argv[]) {
-    if (argc < 4) {
-        printf("Error: Missing target hostname or file\n");
-        return 1;
-    }
-    
-    printf("Sending file to %s...\n", argv[2]);
-    printf("Transfer successful\n");
-    return 0;
-}
-
 // Main CLI handler
 int handle_cli_command(int argc, char *argv[]) {
+    dlog("handle_cli_command: Entered. argc=%d", argc);
+    for(int k_idx=0; k_idx<argc; ++k_idx) dlog("handle_cli_command: initial argv[%d] = '%s'", k_idx, argv[k_idx]);
+
+    cli_command_t cmd;
+    // If no arguments or only "help" is provided, show help.
     if (argc < 2) {
-        printf("Error: No command specified\n");
-        printf("Try 'help' for a list of commands\n");
-        return 1;
+        // For "nexus_cli --server ::1 register-tld test", argc=5, so this is false.
+        cmd_help(); // Show full help
+        return 0; // Return 0 for help display
     }
 
-    const char *command = argv[1];
-
-    if (strcmp(command, "help") == 0) {
-        printf("Available commands:\n");
-        printf("  help           - Show this help message\n");
-        printf("  status         - Show node status information\n");
-        printf("  resolve HOST   - Resolve hostname to IP address\n");
-        printf("  send HOST FILE - Send file to host\n");
-        return 0;
-    } else if (strcmp(command, "status") == 0) {
-        return handle_status_command(argc, argv);
-    } else if (strcmp(command, "resolve") == 0) {
-        return handle_resolve_command(argc, argv);
-    } else if (strcmp(command, "send") == 0) {
-        return handle_send_command(argc, argv);
-    } else {
-        printf("Error: Unknown command '%s'\n", command);
-        printf("Try 'help' for a list of commands\n");
-        return 1;
+    // If not a simple help request, parse fully
+    if (parse_cli_args(argc, argv, &cmd) != 0) {
+        // parse_cli_args prints specific error to stderr
+        cmd_help(); // Show full help on parsing error
+        free_cli_command(&cmd);
+        return 1; // Error
     }
+
+    int result = process_cli_command(&cmd);
+    free_cli_command(&cmd);
+    return result;
 } 

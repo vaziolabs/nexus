@@ -198,6 +198,8 @@ static void* integration_client_thread_func(void* arg) {
 }
 
 int test_quic_dns_cert_integration_main(int argc, char *argv[]) {
+    (void)argc;
+    (void)argv;
     // Set up signal handlers
     signal(SIGINT, handle_integration_signal);
     signal(SIGTERM, handle_integration_signal);

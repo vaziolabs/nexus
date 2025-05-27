@@ -1,14 +1,14 @@
 Failed to initialize QUIC server
-[ngtcp2_client_log] I00000000 0x0f1c6b2238e7e094b71d7bbac38190e8644f con next skip pkn=125
+[ngtcp2_client_log] I00000000 0xf0bd6551faee9e8cf6de3c5367cbc357a480 con next skip pkn=84
 Initializing NEXUS node
-Mode: private
-Hostname: server.nexus.local
+Mode: federated
+Hostname: server2.nexus.local
 Server: localhost
 Successfully generated Falcon-1024 keypair
 DEBUG: Created certificate with common_name: 'Stoq Certificate Authority'
-Signing certificate for 'Stoq Certificate Authority', valid from 1748363969 to 1779899969, type 2
+Signing certificate for 'Stoq Certificate Authority', valid from 1748363971 to 1779899971, type 2
 DEBUG: Message length for signing: 46 bytes
-Successfully generated Falcon signature (size: 1270 bytes)
+Successfully generated Falcon signature (size: 1273 bytes)
 Certificate for 'Stoq Certificate Authority' successfully signed.
 Initializing node
 [DEBUG] Starting node initialization
@@ -20,7 +20,7 @@ Initializing node
 Node running. Press Ctrl+C to stop.
 Starting NEXUS server on port 10053
 Starting NEXUS client on port 10443
-[DEBUG] private
+[DEBUG] federated
 [DEBUG] Initializing client connection to localhost
 [DEBUG] Initializing client for localhost:10053
 [DEBUG] WARNING: No Falcon certificate available, attempting to use file-based certificates
@@ -30,15 +30,15 @@ Starting NEXUS client on port 10443
 [DEBUG] ERROR: Server: Failed to initialize server crypto context (SSL_CTX)
 Successfully generated Falcon-1024 keypair
 DEBUG: Created certificate with common_name: 'Stoq Certificate Authority'
-Signing certificate for 'Stoq Certificate Authority', valid from 1748363969 to 1779899969, type 2
+Signing certificate for 'Stoq Certificate Authority', valid from 1748363971 to 1779899971, type 2
 DEBUG: Message length for signing: 46 bytes
-Successfully generated Falcon signature (size: 1272 bytes)
+Successfully generated Falcon signature (size: 1270 bytes)
 Certificate for 'Stoq Certificate Authority' successfully signed.
-Signing certificate for 'server.nexus.local', valid from 1748363969 to 1756139969, type 1
-DEBUG: Message length for signing: 38 bytes
-Successfully generated Falcon signature (size: 1276 bytes)
-Certificate for 'server.nexus.local' successfully signed.
-[DEBUG] Client initialization complete for server.nexus.local
+Signing certificate for 'server2.nexus.local', valid from 1748363971 to 1756139971, type 1
+DEBUG: Message length for signing: 39 bytes
+Successfully generated Falcon signature (size: 1270 bytes)
+Certificate for 'server2.nexus.local' successfully signed.
+[DEBUG] Client initialization complete for server2.nexus.local
 [DEBUG] Client initialized, attempting connection
 [DEBUG] Starting QUIC handshake
 [DEBUG] Client connection initiated

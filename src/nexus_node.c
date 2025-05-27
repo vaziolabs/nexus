@@ -9,10 +9,12 @@
 #include <unistd.h>
 #include <stdbool.h>  // For bool type
 #include <stdlib.h>   // For malloc
+#include <stdint.h> // For uint16_t
 
 
 int init_node(network_context_t *net_ctx, ca_context_t *ca_ctx, 
              uint16_t server_port, uint16_t client_port, nexus_node_t **out_node) {
+    (void)ca_ctx; // Mark ca_ctx as unused
     dlog("Starting node initialization");
     
     // Allocate node structure on heap so it persists
@@ -25,11 +27,11 @@ int init_node(network_context_t *net_ctx, ca_context_t *ca_ctx,
     dlog("Node structure allocated");
 
     // Initialize node structure with only the fields defined in the header
-    node->server_config.bind_address = net_ctx->hostname;
+    node->server_config.bind_address = net_ctx->hostname ? strdup(net_ctx->hostname) : NULL;
     node->server_config.port = server_port;
     node->server_config.net_ctx = net_ctx;
     
-    node->client_config.bind_address = net_ctx->hostname;
+    node->client_config.bind_address = net_ctx->hostname ? strdup(net_ctx->hostname) : NULL;
     node->client_config.port = client_port;
     node->client_config.net_ctx = net_ctx;
     node->client_config.next_stream_id = 0;
@@ -196,6 +198,7 @@ void cleanup_node(nexus_node_t *node) {
     pthread_join(node->client_thread, NULL);
 
     // Cleanup server
+    free(node->server_config.bind_address); // Free strdup'd memory
     if (node->server_config.conn) {
         ngtcp2_conn_del(node->server_config.conn);
         node->server_config.conn = NULL;
@@ -206,6 +209,7 @@ void cleanup_node(nexus_node_t *node) {
     }
 
     // Cleanup client
+    free(node->client_config.bind_address); // Free strdup'd memory
     if (node->client_config.conn) {
         ngtcp2_conn_del(node->client_config.conn);
         node->client_config.conn = NULL;

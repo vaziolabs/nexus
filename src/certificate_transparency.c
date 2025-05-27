@@ -331,7 +331,7 @@ int verify_certificate_in_ct_log(ct_log_t *ct_log, nexus_cert_t *cert_to_find, c
     
     // Find the certificate in the log
     int found = 0;
-    int index = -1;
+    // int index = -1; // Unused variable
     
     for (int i = 0; i < ct_log->entry_count; i++) {
         // In a real implementation, we would compare the certificate contents
@@ -339,7 +339,7 @@ int verify_certificate_in_ct_log(ct_log_t *ct_log, nexus_cert_t *cert_to_find, c
         if (ct_log->entries[i]->cert->common_name && cert_to_find->common_name &&
             strcmp(ct_log->entries[i]->cert->common_name, cert_to_find->common_name) == 0) {
             found = 1;
-            index = i;
+            // index = i;
             break;
         }
     }
@@ -638,6 +638,7 @@ int ct_sign_certificate(nexus_cert_t *cert, const uint8_t *private_key, uint8_t 
     return falcon_sign(private_key, message, message_len, signature);
 }
 
+/* // Comment out unused function
 // Function to verify signatures in the CT log
 static int verify_signature_in_ct_log(ct_log_t *log, ct_log_entry_t *entry_to_verify, ct_proof_t *proof) {
     if (!log || !entry_to_verify || !proof || !proof->log_pubkey) {
@@ -697,4 +698,8 @@ static int verify_signature_in_ct_log(ct_log_t *log, ct_log_entry_t *entry_to_ve
     }
     
     return 0;
-} 
+}
+*/ // End of commented out function
+
+// Initialize certificate transparency components for a network context
+// ... existing code ... 

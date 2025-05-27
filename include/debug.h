@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 
-// Debug log function
-void dlog(const char *fmt, ...);
+// Debug logging function
+void dlog(const char *format, ...);
 
-#endif // DEBUG_H
+#endif /* DEBUG_H */

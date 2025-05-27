@@ -65,6 +65,7 @@ int verify_certificate(nexus_cert_t* cert, ca_context_t* ca);
 int sign_certificate(nexus_cert_t* cert, ca_context_t* ca);
 int add_federation_signature(nexus_cert_t* cert, const uint8_t* signature);
 void cleanup_certificate_authority(ca_context_t* ca_ctx);
+void free_ca_context(ca_context_t* ca_ctx);
 
 // New functions for Falcon integration
 int generate_falcon_keypair(uint8_t *public_key, uint8_t *private_key);

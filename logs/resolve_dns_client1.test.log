@@ -1,6 +1,27 @@
-[NEXUS] Initializing CLI interface
-[NEXUS] Processing command of type 14
-[NEXUS] Resolving domain client1.test
-Resolving domain client1.test
-Domain 'client1.test' resolved to fd00:1234:5678:9abc:def0:1234:5678:9abc
-[NEXUS] Cleaning up CLI interface
+Error: Did not receive valid response from server (or send failed).
+[DEBUG] handle_cli_command: Entered. argc=5
+[DEBUG] handle_cli_command: initial argv[0] = '/home/persist/repos/vazio/stoq/build/nexus_cli'
+[DEBUG] handle_cli_command: initial argv[1] = '--server'
+[DEBUG] handle_cli_command: initial argv[2] = '::1'
+[DEBUG] handle_cli_command: initial argv[3] = 'resolve'
+[DEBUG] handle_cli_command: initial argv[4] = 'client1.test'
+[DEBUG] parse_cli_args: Started. argc=5
+[DEBUG] parse_cli_args: initial argv[0] = '/home/persist/repos/vazio/stoq/build/nexus_cli'
+[DEBUG] parse_cli_args: initial argv[1] = '--server'
+[DEBUG] parse_cli_args: initial argv[2] = '::1'
+[DEBUG] parse_cli_args: initial argv[3] = 'resolve'
+[DEBUG] parse_cli_args: initial argv[4] = 'client1.test'
+[DEBUG] parse_cli_args: Starting option loop. arg_index=1
+[DEBUG] parse_cli_args: In option loop. argv[1] = '--server'
+[DEBUG] parse_cli_args: Matched '--server'
+[DEBUG] parse_cli_args: Server address (param1) = '::1'
+[DEBUG] parse_cli_args: End of option loop iteration. arg_index=3
+[DEBUG] parse_cli_args: Option loop finished. arg_index=3
+[DEBUG] parse_cli_args: Expecting command at argv[3] = 'resolve'
+[DEBUG] parse_cli_args: Successfully parsed command. Type: 14
+[DEBUG] Processing command of type 14
+[DEBUG] Resolving domain client1.test
+[DEBUG] Serializing packet: version=1, type=3, session_id=0, data_len=260
+[DEBUG] Serialized packet size: 274
+Sending DNS query for: client1.test (type: 28)
+Skipping network send/receive for now. Use stub response.

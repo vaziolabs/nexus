@@ -109,10 +109,19 @@ int test_quic_handshake_main(int argc, char *argv[]) {
 
     // Give the handshake some time to complete
     int wait_attempts = 0;
-    const int max_wait_attempts = 10;
+    const int max_wait_attempts = 30;
     int handshake_completed = 0;
 
     while (wait_attempts < max_wait_attempts && handshake_running) {
+        // Process client and server events to advance the handshake
+        if (node->client_config.conn) {
+            nexus_client_process_events(&node->client_config);
+        }
+        
+        if (node->server_config.conn) {
+            nexus_server_process_events(&node->server_config);
+        }
+
         // Check if the handshake has completed
         if (node->client_config.conn && ngtcp2_conn_get_handshake_completed(node->client_config.conn)) {
             handshake_completed = 1;
@@ -131,6 +140,15 @@ int test_quic_handshake_main(int argc, char *argv[]) {
 
         printf("Waiting for handshake completion (attempt %d/%d)...\n", 
                wait_attempts + 1, max_wait_attempts);
+        
+        // Debug connection status
+        printf("Client connection: %s\n", 
+               node->client_config.conn ? "Initialized" : "Not initialized");
+        printf("Server connection: %s\n", 
+               node->server_config.conn ? "Initialized" : "Not initialized");
+        printf("Client connected: %d, Server connected: %d\n", 
+               node->client_connected, node->server_connected);
+               
         sleep(1);
         wait_attempts++;
     }
@@ -153,3 +171,7 @@ int main(int argc, char *argv[]) {
     return test_quic_handshake_main(argc, argv);
 }
 #endif 
+
+int main(int argc, char *argv[]) {
+    return test_quic_handshake_main(argc, argv);
+} 
