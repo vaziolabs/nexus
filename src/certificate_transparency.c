@@ -10,16 +10,34 @@
 
 // Initialize certificate transparency
 ct_log_t* init_certificate_transparency(network_context_t *net_ctx) {
-    if (!net_ctx || !net_ctx->hostname || !net_ctx->mode) {
+    if (!net_ctx || !net_ctx->hostname || (net_ctx->mode < 0 || net_ctx->mode > 2)) { // Mode should be 0, 1, or 2
         fprintf(stderr, "Error: Invalid network context for CT log initialization.\n");
         return NULL;
     }
 
+    // Convert the mode int to a string for logging
+    char mode_str[20] = "unknown";
+    switch(net_ctx->mode) {
+        case 0:
+            strcpy(mode_str, "private");
+            break;
+        case 1:
+            strcpy(mode_str, "public");
+            break;
+        case 2:
+            strcpy(mode_str, "federated");
+            break;
+        default:
+            strcpy(mode_str, "unknown");
+            break;
+    }
+
     // Construct a log filename, e.g., "private_myhost_ct.log"
     char log_filename[512];
-    snprintf(log_filename, sizeof(log_filename), "%s_%s_ct.log", net_ctx->mode, net_ctx->hostname);
+    snprintf(log_filename, sizeof(log_filename), "%s_%s_ct.log", mode_str, net_ctx->hostname);
 
-    ct_log_t *log = create_ct_log(log_filename, net_ctx->hostname, net_ctx->mode);
+    dlog("Creating CT log: %s", log_filename);
+    ct_log_t *log = create_ct_log(log_filename, net_ctx->hostname, mode_str);
     if (!log) {
         fprintf(stderr, "Error: Failed to create CT log during initialization.\n");
         return NULL;

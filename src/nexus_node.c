@@ -1,9 +1,9 @@
-#include "nexus_node.h"
-#include "nexus_server.h"
-#include "nexus_client.h"
-#include "network_context.h"
-#include "certificate_authority.h"
-#include "debug.h"
+#include "../include/nexus_node.h"
+#include "../include/nexus_server.h"
+#include "../include/nexus_client.h"
+#include "../include/network_context.h"
+#include "../include/certificate_authority.h"
+#include "../include/debug.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -88,6 +88,10 @@ void* server_thread_func(void* arg) {
     server_initialized = true;
     dlog("Server initialized and listening");
     
+    // Add a short delay to allow the server to fully initialize before client connects
+    usleep(100000); // 100ms delay
+    
+    int idle_count = 0;
     while (node->running) {
         if (server_initialized) {
             int ret = nexus_server_process_events(&node->server_config);
@@ -101,8 +105,17 @@ void* server_thread_func(void* arg) {
                 ngtcp2_conn_get_handshake_completed(node->server_config.conn)) {
                 if (!node->server_connected) {
                     node->server_connected = 1;
-                    dlog("Server connection established");
+                    dlog("Server connection established and handshake completed!");
+                    printf("Server handshake completed successfully!\n");
                 }
+            }
+            
+            // Add some extra debugging output
+            if (++idle_count % 100 == 0) {
+                dlog("Server still running (conn=%p, handshake_completed=%d)", 
+                     node->server_config.conn,
+                     node->server_config.conn ? 
+                        ngtcp2_conn_get_handshake_completed(node->server_config.conn) : -1);
             }
         }
 
@@ -119,71 +132,62 @@ void* client_thread_func(void* arg) {
     
     printf("Starting NEXUS client on port %d\n", node->client_config.port);
 
-    if (strcmp(node->net_ctx->mode, "federated") == 0 || 
-        strcmp(node->net_ctx->mode, "private") == 0) {
+    // Check mode: 0 = private, 2 = federated
+    if (node->net_ctx->mode == 0 || node->net_ctx->mode == 2) {
         
-        // In private mode, we should connect even if server is localhost
-        if (strlen(node->net_ctx->server) > 0) {
-            dlog("%s", node->net_ctx->mode);
-            const char *target_server = node->net_ctx->server;
-            
-            // If server and hostname are the same, we still need to connect to
-            // 127.0.0.1 for loopback connections
-            if (strcmp(node->net_ctx->server, node->net_ctx->hostname) == 0) {
-                dlog("Server and hostname are the same, using loopback for client connection");
-                target_server = "127.0.0.1";
-            }
-            
-            dlog("Initializing client connection to %s", target_server);
-            
-            if (init_nexus_client(node->net_ctx, 
-                               target_server, 
-                               node->server_config.port,
-                               &node->client_config) != 0) {
-                dlog("Failed to initialize client");
-                node->running = 0;
-                return NULL;
-            }
-
-            dlog("Client initialized, attempting connection");
-            
-            if (nexus_client_connect(&node->client_config) != 0) {
-                dlog("Failed to connect to server");
-                node->running = 0;
-                return NULL;
-            }
-
-            client_initialized = true;
-            dlog("Client connection initiated");
-        } else {
-            dlog("Client not connecting to server (no server specified)");
+        // In private or federated mode, we need to connect to a server
+        const char *target_server = node->net_ctx->ip_address; // Use the IP from the network context
+        int target_port = node->net_ctx->server_port;  // Use the server port from the network context
+        
+        dlog("Mode: %d", node->net_ctx->mode);
+        dlog("Initializing client connection to %s:%d", target_server, target_port);
+        
+        // Add a short delay to ensure the server is ready
+        usleep(200000); // 200ms delay
+        
+        if (init_nexus_client(node->net_ctx, 
+                           target_server, 
+                           target_port, 
+                           &node->client_config) != 0) {
+            fprintf(stderr, "Failed to initialize QUIC client\n");
+            node->running = 0;
+            return NULL;
         }
-    }
 
+        client_initialized = true;
+        dlog("Client initialized, attempting connection");
+    }
+    
+    // Main client loop
+    int idle_count = 0;
     while (node->running) {
         if (client_initialized) {
-            int ret = nexus_client_process_events(&node->client_config);
-            if (ret < 0) {
-                dlog("Client error processing events");
-                break;
-            }
+            nexus_client_process_events(&node->client_config);
             
-            // Check connection state - only if we have a connection
+            // Check if the handshake has completed
             if (node->client_config.conn && 
                 ngtcp2_conn_get_handshake_completed(node->client_config.conn)) {
-                if (!node->client_connected) {
-                    node->client_connected = 1;
-                    dlog("Client connection established");
+                
+                if (!node->client_config.handshake_completed) {
+                    dlog("QUIC handshake completed on client side!");
+                    node->client_config.handshake_completed = 1;
                 }
             }
-        } else {
-            // No client connection to process, just sleep
-            usleep(10000);
+            
+            dlog("Client still running (conn=%p, handshake_completed=%d)", 
+                 node->client_config.conn, node->client_config.handshake_completed);
         }
-
-        usleep(1000);
+        
+        // Avoid burning CPU in the loop
+        usleep(10000); // 10ms delay
+        
+        idle_count++;
+        if (idle_count >= 10) {
+            idle_count = 0;
+            // Optionally add some idle processing here
+        }
     }
-
+    
     return NULL;
 }
 

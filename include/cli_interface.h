@@ -44,7 +44,7 @@ void cleanup_cli_interface(void);
 
 // Command processing
 int process_cli_command(const cli_command_t *cmd);
-int parse_cli_args(int argc, char **argv, cli_command_t *cmd);
+int parse_cli_args(int argc, char **argv, cli_command_t *cmd, char **socket_path, char **config_profile_name);
 
 // Command execution
 int cmd_help(void);
@@ -61,7 +61,7 @@ int cmd_connect(const char *profile_name);
 int cmd_disconnect(const char *profile_name);
 int cmd_register_tld(const char *profile_name, const char *tld_name);
 int cmd_register_domain(const char *profile_name, const char *domain_name, const char *ipv6_addr);
-int cmd_resolve(const char *domain_name);
+int cmd_resolve(const char *domain_name, const char *server_address);
 int cmd_verify_cert(const char *hostname);
 int cmd_send_data(const char *target_hostname, const char *data);
 int cmd_lookup(const char *hostname);

@@ -383,36 +383,43 @@ int detect_nat_type(void) {
 }
 
 // Create network context from profile
-int create_network_context_from_profile(network_profile_t *profile, network_context_t **net_ctx) {
-    if (!profile || !net_ctx) {
-        return -1;
-    }
-    
-    dlog("Creating network context from profile %s", profile->name);
-    
-    // Allocate network context
+int create_network_context_from_profile(network_profile_t* profile, network_context_t** net_ctx) {
+    if (!profile || !net_ctx) return -1;
+
     *net_ctx = malloc(sizeof(network_context_t));
-    if (!*net_ctx) {
-        return -1;
-    }
-    
+    if (!*net_ctx) return -1;
+
     memset(*net_ctx, 0, sizeof(network_context_t));
-    
+
     // Set values from profile
-    (*net_ctx)->mode = strdup(profile->mode);
+    if (strcmp(profile->mode, "private") == 0) {
+        (*net_ctx)->mode = 0;
+    } else if (strcmp(profile->mode, "public") == 0) {
+        (*net_ctx)->mode = 1;
+    } else if (strcmp(profile->mode, "federated") == 0) {
+        (*net_ctx)->mode = 2;
+    } else {
+        (*net_ctx)->mode = -1; // Unknown mode
+    }
     (*net_ctx)->hostname = strdup(profile->hostname);
-    (*net_ctx)->server = strdup(profile->server);
     
     // Initialize components
-    if (init_network_context_components(*net_ctx) != 0) {
-        free((void*)(*net_ctx)->mode);
-        free((void*)(*net_ctx)->hostname);
-        free((void*)(*net_ctx)->server);
-        free(*net_ctx);
-        *net_ctx = NULL;
+    int mode = (*net_ctx)->mode;
+    char* hostname = (*net_ctx)->hostname;
+    free(*net_ctx); // Free the temporary struct
+    *net_ctx = NULL;
+    
+    // Create a properly initialized context
+    if (init_network_context(net_ctx, mode, hostname) != 0) {
+        free(hostname); // Free the saved hostname since init_network_context failed
         return -1;
     }
-    
+
+    (*net_ctx)->server_port = profile->server_port;
+    (*net_ctx)->client_port = profile->client_port;
+    // IP address might be set dynamically or via different config, not directly from profile always
+    // (*net_ctx)->ip_address = strdup(profile->ip_address_or_interface_name); // Example
+
     return 0;
 }
 
@@ -427,9 +434,16 @@ int update_network_context_from_profile(network_context_t *net_ctx, network_prof
     // Update values from profile
     // Note: This is simplistic and doesn't handle memory management correctly
     // In a real implementation, we would need to free the old strings and allocate new ones
-    net_ctx->mode = strdup(profile->mode);
+    if (strcmp(profile->mode, "private") == 0) {
+        net_ctx->mode = 0;
+    } else if (strcmp(profile->mode, "public") == 0) {
+        net_ctx->mode = 1;
+    } else if (strcmp(profile->mode, "federated") == 0) {
+        net_ctx->mode = 2;
+    } else {
+        net_ctx->mode = -1; // Unknown mode
+    }
     net_ctx->hostname = strdup(profile->hostname);
-    net_ctx->server = strdup(profile->server);
     
     return 0;
 }

@@ -1,2 +1,3 @@
 Failed to initialize QUIC server
-[ngtcp2_client_log] I00000000 0x7540526e9a0b0cece3450aed1b41cc7e95cd con next skip pkn=167
+[ngtcp2_client_log] I00000000 0x48bedfccaddd4d762888290527b0844de5ab con next skip pkn=210
+free(): double free detected in tcache 2

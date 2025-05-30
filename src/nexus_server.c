@@ -3,6 +3,7 @@
 #include "../include/debug.h"
 #include "../include/packet_protocol.h"
 #include "../include/dns_types.h"
+#include "../include/dns_resolver.h"
 #include "../include/certificate_authority.h"
 #include "../include/system.h"
 #include "../include/utils.h"               // For get_timestamp
@@ -157,71 +158,36 @@ static int on_stream_data(ngtcp2_conn *conn, uint32_t flags, int64_t stream_id,
             payload_dns_response_t dns_resp_payload;
             memset(&dns_resp_payload, 0, sizeof(payload_dns_response_t)); // Initializes records to NULL and count to 0
 
-            // Perform DNS lookup using tld_manager
-            // This is a simplified lookup. A real one would parse FQDN, find TLD, then record.
-            // For now, assume query_payload.query_name is the full FQDN and tld_manager can search records directly
-            // or we need a more sophisticated lookup function.
-
-            // TODO: Implement a proper lookup function in tld_manager or a new dns_resolver module.
-            // dns_record_t* found_records = NULL; // This would be an array
-            // int num_found_records = 0;
-            // dns_lookup_status = server_config->net_ctx->tld_manager->lookup_records(query_payload.query_name, query_payload.type, &found_records, &num_found_records);
-
-            // SIMULATED LOOKUP for now:
-            tld_manager_t* tld_m = server_config->net_ctx->tld_manager;
+            // Use the DNS resolver to handle the query
             dns_record_t* result_records = NULL;
             int result_count = 0;
-
-            // Iterate through all TLDs and all their records (very inefficient, for placeholder only)
-            for (size_t i = 0; i < tld_m->tld_count; ++i) {
-                tld_t* current_tld = tld_m->tlds[i];
-                for (size_t j = 0; j < current_tld->record_count; ++j) {
-                    if (strcmp(current_tld->records[j].name, query_payload.query_name) == 0 && 
-                        current_tld->records[j].type == query_payload.type) {
-                        // Found a match
-                        // Reallocate result_records to add this one
-                        dns_record_t* temp = realloc(result_records, (result_count + 1) * sizeof(dns_record_t));
-                        if (!temp) {
-                            dlog("ERROR: Server: Failed to allocate memory for DNS response records.");
-                            // Free previously allocated result_records if any
-                            if(result_records) free(result_records);
-                            dns_resp_payload.status = DNS_STATUS_SERVFAIL;
-                            // Jump to serialization with error status, or break and rely on default SERVFAIL if no packet sent
-                            goto serialize_dns_response; // Ugly, but avoids deep nesting for error path
-                        }
-                        result_records = temp;
-                        // Copy the found record (important: duplicate strings)
-                        result_records[result_count].name = strdup(current_tld->records[j].name);
-                        result_records[result_count].rdata = strdup(current_tld->records[j].rdata);
-                        result_records[result_count].type = current_tld->records[j].type;
-                        result_records[result_count].ttl = current_tld->records[j].ttl;
-                        result_records[result_count].last_updated = current_tld->records[j].last_updated;
-                        
-                        if (!result_records[result_count].name || !result_records[result_count].rdata) {
-                             dlog("ERROR: Server: Failed to strdup for DNS record in response.");
-                             if (result_records[result_count].name) free(result_records[result_count].name);
-                             if (result_records[result_count].rdata) free(result_records[result_count].rdata);
-                             // Don't increment result_count for this failed record
-                             // Potentially could lead to SERVFAIL if this was the only potential match
-                        } else {
-                            result_count++;
-                        }
-                    }
-                }
-            }
-
-            if (result_count > 0) {
-                dns_resp_payload.status = DNS_STATUS_SUCCESS;
-                dns_resp_payload.record_count = result_count;
-                dns_resp_payload.records = result_records; // result_records is already allocated and filled
-            } else {
-                dns_resp_payload.status = DNS_STATUS_NXDOMAIN; // Or whatever status is appropriate
-                dns_resp_payload.record_count = 0;
-                dns_resp_payload.records = NULL;
-                 if(result_records) free(result_records); // Free if allocated but no valid records were strdup'd
+            
+            // Get the resolver from the network context
+            dns_resolver_t* resolver = server_config->net_ctx->dns_resolver;
+            
+            if (!resolver) {
+                dlog("ERROR: Server: DNS resolver not initialized.");
+                dns_resp_payload.status = DNS_STATUS_SERVFAIL;
+                goto serialize_dns_response;
             }
             
-            // Label for goto in case of memory allocation failure during record duplication
+            // Resolve the query
+            dns_response_status_t resolve_status = resolve_dns_query(
+                resolver,
+                query_payload.query_name,
+                query_payload.type,
+                &result_records,
+                &result_count
+            );
+            
+            // Set the response payload based on the resolver results
+            dns_resp_payload.status = resolve_status;
+            dns_resp_payload.record_count = result_count;
+            dns_resp_payload.records = result_records;
+            
+            dlog("Server: DNS query resolved with status %d, found %d records", resolve_status, result_count);
+            
+            // Label for goto in case of errors
             serialize_dns_response:;
 
             response_payload_len = serialize_payload_dns_response(&dns_resp_payload, response_payload_buf, sizeof(response_payload_buf));
@@ -447,6 +413,42 @@ static int init_server_crypto_context(nexus_server_config_t *config) {
             return -1;
         }
     } else {
+        // Check environment variables for certificate and key paths
+        const char *cert_path = getenv("NEXUS_CERT_PATH");
+        const char *key_path = getenv("NEXUS_KEY_PATH");
+        
+        if (cert_path && key_path) {
+            dlog("Using certificate file from NEXUS_CERT_PATH: %s", cert_path);
+            dlog("Using key file from NEXUS_KEY_PATH: %s", key_path);
+            
+            if (SSL_CTX_use_certificate_file(config->crypto_ctx->ssl_ctx, cert_path, SSL_FILETYPE_PEM) <= 0) {
+                dlog("ERROR: Failed to load certificate file %s: %s", cert_path, ERR_error_string(ERR_get_error(), NULL));
+                SSL_CTX_free(config->crypto_ctx->ssl_ctx);
+                free(config->crypto_ctx);
+                config->crypto_ctx = NULL;
+                return -1;
+            }
+            
+            if (SSL_CTX_use_PrivateKey_file(config->crypto_ctx->ssl_ctx, key_path, SSL_FILETYPE_PEM) <= 0) {
+                dlog("ERROR: Failed to load private key file %s: %s", key_path, ERR_error_string(ERR_get_error(), NULL));
+                SSL_CTX_free(config->crypto_ctx->ssl_ctx);
+                free(config->crypto_ctx);
+                config->crypto_ctx = NULL;
+                return -1;
+            }
+            
+            if (SSL_CTX_check_private_key(config->crypto_ctx->ssl_ctx) != 1) {
+                dlog("ERROR: Private key does not match the public certificate: %s", ERR_error_string(ERR_get_error(), NULL));
+                SSL_CTX_free(config->crypto_ctx->ssl_ctx);
+                free(config->crypto_ctx);
+                config->crypto_ctx = NULL;
+                return -1;
+            }
+            
+            dlog("Successfully loaded certificate and key from environment variables");
+            return 0;
+        }
+        
         // Fallback to file-based certificates if needed
         dlog("WARNING: No Falcon certificate available, attempting to use file-based certificates");
         
@@ -537,15 +539,6 @@ static int init_server_crypto_context(nexus_server_config_t *config) {
             }
             
             EVP_PKEY_free(pkey);
-        } else {
-            // If certificate loaded successfully, try to load private key
-            if (SSL_CTX_use_PrivateKey_file(config->crypto_ctx->ssl_ctx, "server.key", SSL_FILETYPE_PEM) <= 0) {
-                dlog("ERROR: Server: Failed to load private key file: %s", ERR_error_string(ERR_get_error(), NULL));
-                SSL_CTX_free(config->crypto_ctx->ssl_ctx);
-                free(config->crypto_ctx);
-                config->crypto_ctx = NULL;
-                return -1;
-            }
             
             if (SSL_CTX_check_private_key(config->crypto_ctx->ssl_ctx) != 1) {
                 dlog("ERROR: Server: Private key does not match the public certificate: %s", ERR_error_string(ERR_get_error(), NULL));
@@ -554,9 +547,28 @@ static int init_server_crypto_context(nexus_server_config_t *config) {
                 config->crypto_ctx = NULL;
                 return -1;
             }
+        } else {
+            // Try to load the corresponding private key
+            if (SSL_CTX_use_PrivateKey_file(config->crypto_ctx->ssl_ctx, "server.key", SSL_FILETYPE_PEM) <= 0) {
+                dlog("ERROR: Failed to load private key file: %s", ERR_error_string(ERR_get_error(), NULL));
+                SSL_CTX_free(config->crypto_ctx->ssl_ctx);
+                free(config->crypto_ctx);
+                config->crypto_ctx = NULL;
+                return -1;
+            }
+            
+            if (SSL_CTX_check_private_key(config->crypto_ctx->ssl_ctx) != 1) {
+                dlog("ERROR: Private key does not match the public certificate: %s", ERR_error_string(ERR_get_error(), NULL));
+                SSL_CTX_free(config->crypto_ctx->ssl_ctx);
+                free(config->crypto_ctx);
+                config->crypto_ctx = NULL;
+                return -1;
+            }
+            
+            dlog("Successfully loaded certificate and key from server.cert and server.key");
         }
     }
-
+    
     // Standard OpenSSL 3+ QUIC setup for server SSL_CTX
     SSL_CTX_set_min_proto_version(config->crypto_ctx->ssl_ctx, TLS1_3_VERSION);
     SSL_CTX_set_max_proto_version(config->crypto_ctx->ssl_ctx, TLS1_3_VERSION);
@@ -826,15 +838,55 @@ int init_nexus_server(network_context_t *net_ctx, const char *bind_address,
 int nexus_server_process_events(nexus_server_config_t *config) {
     if (!config) return -1;
 
+    // Static variables to track connection state
+    static int first_run = 1;
+    static int debug_counter = 0;
+    
     // Handle incoming packets
     uint8_t buf[65535];
     struct sockaddr_in6 client_addr_v6;
     socklen_t client_len = sizeof(client_addr_v6);
     
+    // Print debug info about the server socket and binding
+    if (first_run || debug_counter % 100 == 0) {
+        char ipv6_str[INET6_ADDRSTRLEN];
+        struct sockaddr_in6 server_addr;
+        socklen_t server_len = sizeof(server_addr);
+        
+        if (getsockname(config->sock, (struct sockaddr*)&server_addr, &server_len) == 0) {
+            inet_ntop(AF_INET6, &server_addr.sin6_addr, ipv6_str, sizeof(ipv6_str));
+            dlog("Server socket: bound to [%s]:%d, fd=%d", 
+                 ipv6_str, ntohs(server_addr.sin6_port), config->sock);
+        } else {
+            dlog("Failed to get socket name: %s", strerror(errno));
+        }
+        first_run = 0;
+    }
+    debug_counter++;
+    
+    // Try to receive a packet with a short timeout
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 10000; // 10ms timeout
+    
+    if (setsockopt(config->sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        dlog("Failed to set socket timeout: %s", strerror(errno));
+    }
+    
     ssize_t nread = recvfrom(config->sock, buf, sizeof(buf), 0,
                             (struct sockaddr*)&client_addr_v6, &client_len);
     
     if (nread > 0) {
+        // Convert client address to string for logging
+        char client_ip[INET6_ADDRSTRLEN];
+        inet_ntop(AF_INET6, &client_addr_v6.sin6_addr, client_ip, sizeof(client_ip));
+        dlog("Server received packet (%zd bytes) from [%s]:%d", 
+             nread, client_ip, ntohs(client_addr_v6.sin6_port));
+        
+        // Print first few bytes of the packet for debugging
+        dlog("Packet header: %02X %02X %02X %02X %02X %02X %02X %02X", 
+             buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]);
+        
         ngtcp2_path path = {
             .local = {
                 .addr = (struct sockaddr*)&client_addr_v6,
@@ -847,22 +899,139 @@ int nexus_server_process_events(nexus_server_config_t *config) {
         };
 
         ngtcp2_pkt_info pi = {0};
-        ngtcp2_conn_read_pkt(config->conn, &path, &pi, buf, nread, get_timestamp());
+        
+        // If we don't have a connection yet, create one
+        if (!config->conn) {
+            dlog("Creating new server connection for incoming packet");
+            
+            // First, decode the packet to get information needed for the new connection
+            ngtcp2_pkt_hd hd;
+            int rv;
+            
+            // Parse the packet header
+            rv = ngtcp2_pkt_decode_hd_long(&hd, buf, nread);
+            if (rv < 0) {
+                dlog("Failed to decode packet header: %s", ngtcp2_strerror(rv));
+                return -1;
+            }
+            
+            dlog("Decoded QUIC packet: ver=%08x, dcid=%zu bytes, scid=%zu bytes", 
+                 hd.version, hd.dcid.datalen, hd.scid.datalen);
+            
+            // Initialize transport parameters
+            ngtcp2_transport_params params;
+            ngtcp2_transport_params_default(&params);
+            params.initial_max_streams_bidi = 100;
+            params.initial_max_streams_uni = 100;
+            params.initial_max_data = 1 * 1024 * 1024;
+            params.initial_max_stream_data_bidi_local = 256 * 1024;
+            params.initial_max_stream_data_bidi_remote = 256 * 1024;
+            params.original_dcid = hd.dcid;
+            params.original_dcid_present = 1;
+            params.active_connection_id_limit = 8;
+            
+            // Create a new connection
+            ngtcp2_cid scid = hd.dcid;
+            ngtcp2_cid dcid = hd.scid;
+            
+            ngtcp2_conn *conn;
+            rv = ngtcp2_conn_server_new(&conn, &dcid, &scid, &path, 
+                                      hd.version, &config->callbacks, 
+                                      &config->settings, &params, NULL, config);
+            if (rv != 0) {
+                dlog("Failed to create new connection: %s", ngtcp2_strerror(rv));
+                return -1;
+            }
+            
+            config->conn = conn;
+            dlog("Server connection created successfully");
+            
+            // Create SSL object for TLS handshake
+            SSL *ssl = SSL_new(config->crypto_ctx->ssl_ctx);
+            if (!ssl) {
+                dlog("Failed to create SSL object: %s", ERR_error_string(ERR_get_error(), NULL));
+                ngtcp2_conn_del(config->conn);
+                config->conn = NULL;
+                return -1;
+            }
+            
+            config->crypto_ctx->ssl = ssl;
+            
+            // Set SSL to accept mode
+            SSL_set_accept_state(ssl);
+            
+            // Associate the SSL object with the QUIC connection
+            ngtcp2_conn_set_tls_native_handle(config->conn, ssl);
+        }
+        
+        // Now process the packet with the connection
+        if (config->conn) {
+            int rv = ngtcp2_conn_read_pkt(config->conn, &path, &pi, buf, nread, get_timestamp());
+            if (rv != 0) {
+                dlog("Error processing packet: %s", ngtcp2_strerror(rv));
+                // Don't tear down the connection on error - let it retry
+                // (some errors are expected during handshake)
+            }
 
-        // Send any pending data
+            // Send any pending data
+            uint8_t send_buf[65535];
+            ngtcp2_path_storage ps;
+            ngtcp2_path_storage_zero(&ps);
+            
+            ngtcp2_pkt_info pktinfo = {0};
+            
+            // Try to send data
+            ssize_t n = ngtcp2_conn_write_pkt(config->conn, &ps.path, &pktinfo,
+                                             send_buf, sizeof(send_buf), get_timestamp());
+            
+            if (n > 0) {
+                ssize_t sent = sendto(config->sock, send_buf, n, 0,
+                       (struct sockaddr*)&client_addr_v6, client_len);
+                dlog("Server sent %zd bytes in response to [%s]:%d", 
+                     sent, client_ip, ntohs(client_addr_v6.sin6_port));
+                
+                // Print first few bytes of the response for debugging
+                dlog("Response header: %02X %02X %02X %02X %02X %02X %02X %02X",
+                     send_buf[0], send_buf[1], send_buf[2], send_buf[3],
+                     send_buf[4], send_buf[5], send_buf[6], send_buf[7]);
+            }
+        }
+    } else if (nread < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+        dlog("Error receiving packet: %s", strerror(errno));
+    } else if (config->conn) {
+        // No new packet received, but we have an existing connection
+        // Still need to process any timeouts and generate any needed packets
+        
         uint8_t send_buf[65535];
         ngtcp2_path_storage ps;
         ngtcp2_path_storage_zero(&ps);
-        
         ngtcp2_pkt_info pktinfo = {0};
         
-        // Try to send data
+        // Set up path for timeout packets if needed
+        struct sockaddr_in6 server_addr;
+        socklen_t server_len = sizeof(server_addr);
+        
+        if (getsockname(config->sock, (struct sockaddr*)&server_addr, &server_len) == 0) {
+            ps.path.local.addr = (struct sockaddr*)&server_addr;
+            ps.path.local.addrlen = server_len;
+            
+            // Use last known client address for remote
+            ps.path.remote.addr = (struct sockaddr*)&client_addr_v6;
+            ps.path.remote.addrlen = client_len;
+        }
+        
+        // Try to generate timeout packets
         ssize_t n = ngtcp2_conn_write_pkt(config->conn, &ps.path, &pktinfo,
                                          send_buf, sizeof(send_buf), get_timestamp());
         
         if (n > 0) {
-            sendto(config->sock, send_buf, n, 0,
+            char client_ip[INET6_ADDRSTRLEN];
+            inet_ntop(AF_INET6, &client_addr_v6.sin6_addr, client_ip, sizeof(client_ip));
+            
+            ssize_t sent = sendto(config->sock, send_buf, n, 0,
                    (struct sockaddr*)&client_addr_v6, client_len);
+            dlog("Server sent timeout packet (%zd bytes) to [%s]:%d", 
+                 sent, client_ip, ntohs(client_addr_v6.sin6_port));
         }
     }
 

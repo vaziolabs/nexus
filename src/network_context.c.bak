@@ -1,57 +1,9 @@
-#include "../include/network_context.h"
-#include "../include/debug.h"
-#include "../include/tld_manager.h" // For init_tld_manager and cleanup_tld_manager
+#include "network_context.h"
+#include "debug.h"
+#include "tld_manager.h" // For init_tld_manager and cleanup_tld_manager
 #include <string.h>
 #include <stdlib.h> // For malloc, free
 #include <stdio.h>  // For fprintf, stderr
-
-// Initialize network context
-int init_network_context(network_context_t **out_ctx, int mode, const char *hostname) {
-    if (!out_ctx || !hostname) {
-        return -1;
-    }
-    
-    network_context_t *ctx = (network_context_t*)malloc(sizeof(network_context_t));
-    if (!ctx) {
-        return -1;
-    }
-    
-    memset(ctx, 0, sizeof(network_context_t));
-    
-    // Initialize basic fields
-    ctx->mode = mode;
-    ctx->hostname = strdup(hostname);
-    if (!ctx->hostname) {
-        free(ctx);
-        return -1;
-    }
-    
-    // Initialize components
-    if (init_network_context_components(ctx) != 0) {
-        free(ctx->hostname);
-        free(ctx);
-        return -1;
-    }
-    
-    *out_ctx = ctx;
-    return 0;
-}
-
-// Cleanup network context
-void cleanup_network_context(network_context_t *ctx) {
-    if (!ctx) {
-        return;
-    }
-    
-    // First cleanup components
-    cleanup_network_context_components(ctx);
-    
-    // Then free allocated strings
-    free(ctx->hostname);
-    
-    // Finally free the context itself
-    free(ctx);
-}
 
 // Add connection status check
 void check_connection_status(network_context_t *net_ctx) {
@@ -59,15 +11,16 @@ void check_connection_status(network_context_t *net_ctx) {
     
     // Print basic node info
     dlog("Node Status:");
-    dlog("Mode: %d", net_ctx->mode);
+    dlog("Mode: %s", net_ctx->mode);
     dlog("Hostname: %s", net_ctx->hostname);
+    dlog("Server: %s", net_ctx->server);
     
     // Add connection test
-    if (net_ctx->mode == 0) { // Private mode
+    if (strcmp(net_ctx->mode, "private") == 0) {
         dlog("Private mode - listening for incoming connections");
-    } else if (net_ctx->mode == 1) { // Public mode
+    } else if (strcmp(net_ctx->mode, "public") == 0) {
         dlog("Public mode - attempting to connect to known peers");
-    } else if (net_ctx->mode == 2) { // Federated mode
+    } else if (strcmp(net_ctx->mode, "federated") == 0) {
         dlog("Federated mode - connecting to federation network");
     }
 }
@@ -108,6 +61,9 @@ int init_network_context_components(network_context_t* net_ctx) {
         return -1;
     }
 
+    net_ctx->peer_list = NULL; // Explicitly NULL, to be managed elsewhere or later
+    net_ctx->active_requests = NULL; // Explicitly NULL, to be managed elsewhere or later
+
     return 0;
 }
 
@@ -140,4 +96,6 @@ void cleanup_network_context_components(network_context_t* net_ctx) {
 
     // Destroy the main network context mutex
     pthread_mutex_destroy(&net_ctx->lock);
+
+    // TODO: Cleanup peer_list, tld_manager, active_requests if they were allocated
 }

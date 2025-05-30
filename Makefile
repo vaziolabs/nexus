@@ -64,6 +64,7 @@ CLI_TARGET := $(BUILD_DIR)/nexus_cli
 TEST_TARGET := $(BUILD_DIR)/nexus_tests
 HANDSHAKE_TEST_TARGET := $(BUILD_DIR)/test_quic_handshake
 IPV6_HANDSHAKE_TEST_TARGET := $(BUILD_DIR)/test_ipv6_quic_handshake
+IPV6_FALCON_TEST_TARGET := $(BUILD_DIR)/test_ipv6_falcon_handshake
 INTEGRATION_TEST_SCRIPT := $(TESTS_DIR)/nexus_integration_test.sh
 
 # Default target
@@ -170,6 +171,7 @@ help:
 	@echo "  test       - Build and run all unit tests"
 	@echo "  test_handshake - Build and run QUIC handshake test"
 	@echo "  test_ipv6  - Build and run IPv6 QUIC handshake test"
+	@echo "  test_ipv6_falcon - Build and run IPv6 Falcon post-quantum handshake test"
 	@echo "  test_tld   - Run only TLD Manager tests"
 	@echo "  test_packet - Run only Packet Protocol tests"
 	@echo "  test_config - Run only Config Manager tests"
@@ -180,7 +182,7 @@ help:
 	@echo "  integration_test - Run the full integration test suite"
 
 # Phony targets
-.PHONY: all check_deps clean deps help test test_handshake test_ipv6 test_tld test_packet test_config test_cli test_ct test_ca test_network integration_test test_standalone_ca test_standalone_ct test_falcon_verify list_includes
+.PHONY: all check_deps clean deps help test test_handshake test_ipv6 test_ipv6_falcon test_tld test_packet test_config test_cli test_ct test_ca test_network integration_test test_standalone_ca test_standalone_ct test_falcon_verify list_includes
 
 # Build will stop if any command fails
 .DELETE_ON_ERROR:
@@ -194,7 +196,7 @@ help:
 # Moved these definitions before their first use in $(TEST_TARGET)
 # Filter out standalone test files from the main test suite sources
 ALL_TEST_CSRCS := $(wildcard $(TESTS_DIR)/*.c)
-STANDALONE_TEST_CSRCS := $(TESTS_DIR)/test_quic_handshake.c $(TESTS_DIR)/test_ipv6_quic_handshake.c $(TESTS_DIR)/test_falcon_verify.c $(TESTS_DIR)/standalone_ca_test.c $(TESTS_DIR)/standalone_ct_test.c
+STANDALONE_TEST_CSRCS := $(TESTS_DIR)/test_quic_handshake.c $(TESTS_DIR)/test_ipv6_quic_handshake.c $(TESTS_DIR)/test_ipv6_falcon_handshake.c $(TESTS_DIR)/test_falcon_verify.c $(TESTS_DIR)/standalone_ca_test.c $(TESTS_DIR)/standalone_ct_test.c
 TEST_SUITE_CSRCS := $(filter-out $(STANDALONE_TEST_CSRCS), $(ALL_TEST_CSRCS))
 
 TEST_SUITE_OBJS := $(TEST_SUITE_CSRCS:$(TESTS_DIR)/%.c=$(BUILD_DIR)/%.o)
@@ -208,7 +210,7 @@ $(BUILD_DIR)/%.o: $(TESTS_DIR)/%.c
 	@$(CC) $(CFLAGS) -I./$(INCLUDE_DIR) -c $< -o $@
 
 # Link the test executable (nexus_tests)
-$(TEST_TARGET): $(BUILD_DIR) $(SRC_OBJS_FOR_TESTS) $(TEST_SUITE_OBJS) $(FALCON_OBJS)
+$(TEST_TARGET): $(BUILD_DIR) $(SRC_OBJS_FOR_TESTS) $(TEST_SUITE_OBJS) $(FALCON_OBJS) $(BUILD_DIR)/test_certificate_transparency.o
 	@echo "Linking $(TEST_TARGET)..."
 	@$(CC) $(CFLAGS) $(SRC_OBJS_FOR_TESTS) $(TEST_SUITE_OBJS) $(FALCON_OBJS) -o $(TEST_TARGET) $(NEXUS_LIBS)
 	@echo "Test build successful!"
@@ -228,6 +230,13 @@ $(IPV6_HANDSHAKE_TEST_TARGET): $(BUILD_DIR) $(BUILD_DIR)/test_ipv6_quic_handshak
 	@echo "IPv6 handshake test build successful!"
 	@echo "Test binary location: $(IPV6_HANDSHAKE_TEST_TARGET)"
 
+# Link the IPv6 Falcon handshake test executable
+$(IPV6_FALCON_TEST_TARGET): $(BUILD_DIR) $(BUILD_DIR)/test_ipv6_falcon_handshake.o $(SRC_OBJS_FOR_TESTS) $(FALCON_OBJS)
+	@echo "Linking $(IPV6_FALCON_TEST_TARGET)..."
+	@$(CC) $(CFLAGS) $(BUILD_DIR)/test_ipv6_falcon_handshake.o $(SRC_OBJS_FOR_TESTS) $(FALCON_OBJS) -o $(IPV6_FALCON_TEST_TARGET) $(NEXUS_LIBS)
+	@echo "IPv6 Falcon handshake test build successful!"
+	@echo "Test binary location: $(IPV6_FALCON_TEST_TARGET)"
+
 # Run tests
 test: $(TEST_TARGET)
 	@echo "Running unit tests..."
@@ -242,6 +251,11 @@ test_handshake: $(HANDSHAKE_TEST_TARGET)
 test_ipv6: $(IPV6_HANDSHAKE_TEST_TARGET)
 	@echo "Running IPv6 QUIC handshake test..."
 	@./$(IPV6_HANDSHAKE_TEST_TARGET)
+
+# Run IPv6 Falcon handshake test
+test_ipv6_falcon: $(IPV6_FALCON_TEST_TARGET)
+	@echo "Running IPv6 Falcon QUIC handshake test..."
+	@./$(IPV6_FALCON_TEST_TARGET)
 
 # --- Individual Test Targets ---
 test_tld: $(TEST_TARGET)

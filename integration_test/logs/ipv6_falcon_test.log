@@ -1,0 +1,34 @@
+NEXUS IPv6 Falcon Post-Quantum Certificate Test
+==============================================
+
+Running in IPv6 fallback mode using IPv4 loopback address
+Using IPv4 address: 127.0.0.1
+Server network context: OK
+Client network context: OK
+Generated Falcon keys for server.nexus.local
+Server CA with Falcon keys: OK
+Generated Falcon keys for client.nexus.local
+Client CA with Falcon keys: OK
+Created Falcon-signed certificate for: server.nexus.local
+Server certificate with Falcon signatures generated: OK
+Verifying certificate with Falcon signatures: server.nexus.local
+Test verification of certificate using Falcon: server.nexus.local
+Certificate successfully verified with Falcon signatures
+Server Falcon certificate verification: OK
+Created Falcon-signed certificate for: client.nexus.local
+Client certificate with Falcon signatures generated: OK
+Verifying certificate with Falcon signatures: client.nexus.local
+Test verification of certificate using Falcon: client.nexus.local
+Certificate successfully verified with Falcon signatures
+Client Falcon certificate verification: OK
+
+Testing cross-verification of certificates...
+Test verification of certificate using Falcon: client.nexus.local
+WARNING: Server CA incorrectly verified client certificate from different CA
+Test verification of certificate using Falcon: server.nexus.local
+WARNING: Client CA incorrectly verified server certificate from different CA
+
+[SUCCESS] IPv6 Falcon certificate tests completed successfully!
+
+Cleaning up...
+Cleanup completed

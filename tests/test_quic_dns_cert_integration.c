@@ -207,31 +207,27 @@ int test_quic_dns_cert_integration_main(int argc, char *argv[]) {
     printf("Starting QUIC DNS Certificate Integration Test\n");
     
     // Initialize server network context
-    network_context_t server_net_ctx = {
-        .mode = "private",
-        .hostname = "server.test.local",
-        .server = "server.test.local",
-        .peer_list = NULL,
-        .dns_cache = NULL,
-        .tld_manager = NULL,
-        .active_requests = NULL
-    };
+    network_context_t server_net_ctx;
+    memset(&server_net_ctx, 0, sizeof(network_context_t));
+    server_net_ctx.mode = 0;  // 0 = private mode
+    server_net_ctx.hostname = strdup("server.test.local");
+    server_net_ctx.server_port = 10053;
+    server_net_ctx.client_port = 10443;
     
     // Initialize client network context
-    network_context_t client_net_ctx = {
-        .mode = "private",
-        .hostname = "client.test.local",
-        .server = "server.test.local",
-        .peer_list = NULL,
-        .dns_cache = NULL,
-        .tld_manager = NULL,
-        .active_requests = NULL
-    };
+    network_context_t client_net_ctx;
+    memset(&client_net_ctx, 0, sizeof(network_context_t));
+    client_net_ctx.mode = 0;  // 0 = private mode
+    client_net_ctx.hostname = strdup("client.test.local");
+    client_net_ctx.server_port = 10053;
+    client_net_ctx.client_port = 10443;
     
     // Initialize network context components
     if (init_network_context_components(&server_net_ctx) != 0 ||
         init_network_context_components(&client_net_ctx) != 0) {
         fprintf(stderr, "Failed to initialize network context components\n");
+        free(server_net_ctx.hostname);
+        free(client_net_ctx.hostname);
         return 1;
     }
     
@@ -285,6 +281,9 @@ int test_quic_dns_cert_integration_main(int argc, char *argv[]) {
     // Clean up
     cleanup_network_context_components(&server_net_ctx);
     cleanup_network_context_components(&client_net_ctx);
+    
+    free(server_net_ctx.hostname);
+    free(client_net_ctx.hostname);
     
     return test_result;
 }

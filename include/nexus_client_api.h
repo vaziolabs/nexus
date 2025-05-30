@@ -44,4 +44,14 @@ ssize_t nexus_node_send_receive_packet(
     int timeout_ms
 );
 
+// Function to send a raw NEXUS packet and receive a response
+// Caller is responsible for freeing *response_packet_data if the call is successful (>0 return)
+ssize_t nexus_client_send_receive_raw_packet(
+    const char *server_address, 
+    uint16_t server_port, 
+    const uint8_t *request_packet_data, 
+    size_t request_packet_len, 
+    uint8_t **response_packet_data
+);
+
 #endif // NEXUS_CLIENT_API_H 

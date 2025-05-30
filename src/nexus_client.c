@@ -212,192 +212,233 @@ static void cleanup_client_crypto_context(nexus_client_config_t *config) {
     config->crypto_ctx = NULL;
 }
 
-int init_nexus_client(network_context_t *net_ctx, const char *remote_addr, 
-                    uint16_t port, nexus_client_config_t *config) {
-    if (!remote_addr || !net_ctx || !config) return -1;
-    dlog("Initializing client for %s:%u", remote_addr, port);
-
-    memset(config, 0, sizeof(nexus_client_config_t));
-    config->net_ctx = net_ctx;
-    config->next_stream_id = 0; 
-
-    ca_context_t *ca_ctx = NULL;
-    if (init_certificate_authority(net_ctx, &ca_ctx) != 0) {
-        dlog("ERROR: Failed to initialize certificate authority for client");
+int init_nexus_client(network_context_t *ctx, const char *server_addr, uint16_t server_port, nexus_client_config_t *config) {
+    if (!ctx || !server_addr || !config) {
         return -1;
     }
-
-    nexus_cert_t *client_cert = NULL;
-    if (handle_cert_request(ca_ctx, net_ctx->hostname, &client_cert) != 0) {
-        dlog("ERROR: Failed to obtain client certificate for client");
-        // Consider freeing ca_ctx if it was successfully initialized
-        return -1;
+    
+    dlog("Initializing client for %s:%d", server_addr, server_port);
+    
+    // Store server address
+    if (config->bind_address) {
+        free(config->bind_address);
     }
-    config->ca_ctx = ca_ctx; 
-    config->cert = client_cert;
-
-    ngtcp2_settings settings;
-    ngtcp2_settings_default(&settings);
-    settings.log_printf = client_log_wrapper; 
-    settings.initial_ts = get_timestamp();    
-    // settings.max_active_connection_id_limit = NGTCP2_DEFAULT_ACTIVE_CONNECTION_ID_LIMIT; // This is a transport param now
-    config->settings = settings; 
-
-    if (init_client_crypto_context(config) != 0) {
-        dlog("ERROR: Failed to initialize client crypto context");
-        goto err_crypto_init;
-    }
-
-    ngtcp2_callbacks callbacks = {0};
-    callbacks.handshake_completed = on_handshake_completed;
-    callbacks.recv_stream_data = client_on_stream_data;
-    callbacks.stream_close = client_on_stream_close;
-    callbacks.stream_open = client_on_stream_open;
-    callbacks.recv_retry = client_recv_retry;
+    config->bind_address = strdup(server_addr);
+    config->port = server_port;
     
-    // Attempt to set the core crypto callbacks. If these are undeclared by compiler,
-    // it means ngtcp2_crypto.h is not providing them as expected.
-    callbacks.client_initial = ngtcp2_crypto_client_initial_cb;
-    callbacks.recv_crypto_data = ngtcp2_crypto_recv_crypto_data_cb;
-    callbacks.encrypt = ngtcp2_crypto_encrypt_cb;
-    callbacks.decrypt = ngtcp2_crypto_decrypt_cb;
-    callbacks.hp_mask = ngtcp2_crypto_hp_mask_cb;
-    callbacks.rand = client_rand_callback_wrapper; // Custom wrapper
-    
-    // Add the missing callback
-    callbacks.get_new_connection_id = client_get_new_connection_id;
-    callbacks.update_key = client_update_key;
-    callbacks.delete_crypto_aead_ctx = client_delete_crypto_aead_ctx;
-    callbacks.delete_crypto_cipher_ctx = client_delete_crypto_cipher_ctx;
-    callbacks.get_path_challenge_data = client_get_path_challenge_data;
-    
-    // Leave other _cb suffixed ones NULL for now, to see if build passes or what asserts next.
-    // callbacks.remove_connection_id = ngtcp2_crypto_remove_connection_id_cb;
-    // callbacks.version_negotiation = ngtcp2_crypto_version_negotiation_cb;
-    config->callbacks = callbacks; 
-    
-    uint8_t dcid_data[NGTCP2_MAX_CIDLEN], scid_data[NGTCP2_MAX_CIDLEN];
-    size_t dcid_len = 18, scid_len = 18;
-    ngtcp2_cid dcid, scid;
-    RAND_bytes(dcid_data, dcid_len); RAND_bytes(scid_data, scid_len);
-    ngtcp2_cid_init(&dcid, dcid_data, dcid_len); ngtcp2_cid_init(&scid, scid_data, scid_len);
-
-    ngtcp2_transport_params conn_params;
-    ngtcp2_transport_params_default(&conn_params);
-    conn_params.initial_max_streams_bidi = 100;
-    conn_params.initial_max_streams_uni = 100;
-    conn_params.initial_max_data = 1 * 1024 * 1024; 
-    conn_params.initial_max_stream_data_bidi_local = 256 * 1024;
-    conn_params.initial_max_stream_data_bidi_remote = 256 * 1024;
-    conn_params.original_dcid_present = 0;
-    conn_params.active_connection_id_limit = 8;
-
-    ngtcp2_path path_struct = {0};
-    struct sockaddr_in6 local_addr_v6 = {.sin6_family = AF_INET6, .sin6_port = 0, .sin6_addr = IN6ADDR_ANY_INIT};
-    struct sockaddr_in6 remote_addr_sockaddr_v6 = {.sin6_family = AF_INET6, .sin6_port = htons(port)};
-    
-    if (inet_pton(AF_INET6, remote_addr, &remote_addr_sockaddr_v6.sin6_addr) != 1) {
-        if (strcmp(remote_addr, "localhost") == 0 || strcmp(remote_addr, "127.0.0.1") == 0) {
-            inet_pton(AF_INET6, "::1", &remote_addr_sockaddr_v6.sin6_addr);
-        } else {
-            dlog("ERROR: Invalid IPv6 address: %s", remote_addr);
-            goto err_crypto_init; 
-        }
-    }
-    path_struct.local.addr = (struct sockaddr*)&local_addr_v6;
-    path_struct.local.addrlen = sizeof(local_addr_v6);
-    path_struct.remote.addr = (struct sockaddr*)&remote_addr_sockaddr_v6;
-    path_struct.remote.addrlen = sizeof(remote_addr_sockaddr_v6);
-
-    ngtcp2_conn *conn_ptr = NULL;
-    if (ngtcp2_conn_client_new(&conn_ptr, &dcid, &scid, &path_struct, NGTCP2_PROTO_VER_MAX, 
-                               &config->callbacks, &config->settings, &conn_params, NULL, config) != 0) {
-        dlog("ERROR: Failed to create QUIC connection object for client");
-        goto err_crypto_init;
-    }
-    config->conn = conn_ptr;
-
-    ngtcp2_conn_set_tls_native_handle(config->conn, config->crypto_ctx->ssl);
-
+    // Create IPv6 UDP socket
     config->sock = socket(AF_INET6, SOCK_DGRAM, 0);
     if (config->sock < 0) {
-        dlog("ERROR: Failed to create client socket");
-        goto err_conn_new;
+        perror("socket");
+        return -1;
     }
+    
+    // Configure socket for non-blocking operation
     int flags = fcntl(config->sock, F_GETFL, 0);
-    fcntl(config->sock, F_SETFL, flags | O_NONBLOCK);
-
-    if (connect(config->sock, (struct sockaddr*)&remote_addr_sockaddr_v6, sizeof(remote_addr_sockaddr_v6)) < 0 && errno != EINPROGRESS) {
-        dlog("ERROR: Failed to connect client socket to %s:%u - %s", remote_addr, port, strerror(errno));
-        goto err_socket;
+    if (flags == -1) {
+        perror("fcntl(F_GETFL)");
+        close(config->sock);
+        return -1;
     }
-
-    config->bind_address = strdup(remote_addr);
-    config->port = port;
+    if (fcntl(config->sock, F_SETFL, flags | O_NONBLOCK) == -1) {
+        perror("fcntl(F_SETFL)");
+        close(config->sock);
+        return -1;
+    }
+    
+    // Bind to a specific local port if specified in the config
+    if (ctx->client_port > 0) {
+        struct sockaddr_in6 local_addr = {
+            .sin6_family = AF_INET6,
+            .sin6_port = htons(ctx->client_port),
+            .sin6_addr = in6addr_any
+        };
+        
+        if (bind(config->sock, (struct sockaddr *)&local_addr, sizeof(local_addr)) != 0) {
+            perror("bind");
+            // Non-fatal, we'll get a random port
+            dlog("Warning: Failed to bind to client port %d", ctx->client_port);
+        } else {
+            dlog("Successfully bound to client port %d", ctx->client_port);
+        }
+    }
+    
+    // Set up client settings for QUIC
+    config->settings.initial_ts = get_timestamp();
+    config->settings.log_printf = NULL;
+    
+    // Set up QUIC callbacks
+    config->callbacks.client_initial = client_initial;
+    config->callbacks.recv_crypto_data = client_recv_crypto_data;
+    config->callbacks.encrypt = client_encrypt_cb;
+    config->callbacks.decrypt = client_decrypt_cb;
+    config->callbacks.hp_mask = client_hp_mask_cb;
+    config->callbacks.recv_stream_data = client_recv_stream_data;
+    config->callbacks.acked_stream_data_offset = client_acked_stream_data_offset;
+    config->callbacks.stream_open = client_stream_open;
+    config->callbacks.stream_close = client_stream_close;
+    config->callbacks.rand = client_rand_cb;
+    config->callbacks.get_new_connection_id = client_get_new_connection_id;
+    config->callbacks.update_key = client_update_key;
+    config->callbacks.delete_crypto_aead_ctx = client_delete_crypto_aead_ctx;
+    config->callbacks.delete_crypto_cipher_ctx = client_delete_crypto_cipher_ctx;
+    config->callbacks.stream_reset = client_stream_reset;
+    
+    // Initialize client parameters
+    ngtcp2_transport_params params;
+    ngtcp2_transport_params_default(&params);
+    params.initial_max_streams_bidi = 100;
+    params.initial_max_streams_uni = 100;
+    params.initial_max_data = 1 * 1024 * 1024;
+    params.initial_max_stream_data_bidi_local = 256 * 1024;
+    params.initial_max_stream_data_bidi_remote = 256 * 1024;
+    
+    // Generate random source and destination connection IDs
+    uint8_t scid_buf[32], dcid_buf[32];
+    ngtcp2_cid scid, dcid;
+    
+    generate_secure_random(scid_buf, 32);
+    generate_secure_random(dcid_buf, 32);
+    
+    ngtcp2_cid_init(&scid, scid_buf, 16);
+    ngtcp2_cid_init(&dcid, dcid_buf, 16);
+    
+    // Set up path information for the client
+    struct sockaddr_in6 path_addr = {
+        .sin6_family = AF_INET6,
+        .sin6_port = htons(server_port)
+    };
+    
+    if (inet_pton(AF_INET6, server_addr, &path_addr.sin6_addr) != 1) {
+        if (strcmp(server_addr, "localhost") == 0 || strcmp(server_addr, "127.0.0.1") == 0) {
+            inet_pton(AF_INET6, "::1", &path_addr.sin6_addr);
+            dlog("Using IPv6 ::1 for localhost");
+        } else {
+            dlog("ERROR: Invalid IPv6 address: %s", server_addr);
+            close(config->sock);
+            return -1;
+        }
+    }
+    
+    ngtcp2_path path = {
+        .local = {
+            .addrlen = sizeof(struct sockaddr_in6),
+            .addr = (struct sockaddr *)&path_addr
+        },
+        .remote = {
+            .addrlen = sizeof(struct sockaddr_in6),
+            .addr = (struct sockaddr *)&path_addr
+        }
+    };
+    
+    // Create QUIC client connection
+    int ret = ngtcp2_conn_client_new(&config->conn, &dcid, &scid, &path,
+                                    NGTCP2_PROTO_VER_V1, &config->callbacks,
+                                    &config->settings, &params, NULL, config);
+    
+    if (ret != 0) {
+        dlog("ERROR: Failed to create QUIC client connection: %s", ngtcp2_strerror(ret));
+        close(config->sock);
+        return -1;
+    }
+    
+    // Initialize TLS context for client
+    if (init_client_crypto_context(config) != 0) {
+        dlog("ERROR: Failed to initialize client crypto context");
+        ngtcp2_conn_del(config->conn);
+        close(config->sock);
+        return -1;
+    }
+    
+    // Initialize handshake state
     config->handshake_completed = 0;
-
-    dlog("Client initialization complete for %s", net_ctx->hostname);
-    return 0;
-
-err_socket:
-    close(config->sock);
-err_conn_new:
-    ngtcp2_conn_del(config->conn);
-err_crypto_init:
-    cleanup_client_crypto_context(config);
-    free_certificate(config->cert); 
-    if (config->ca_ctx) free_ca_context(config->ca_ctx); 
-    if (config->bind_address && (strcmp(config->bind_address, remote_addr) == 0) ) { 
-        // Only free if it's the one strdup'd by this function
-        free((void*)config->bind_address); config->bind_address = NULL;
-    } else if (config->bind_address) {
-        // If bind_address was from somewhere else, don't free. This logic is tricky.
-        // Best to ensure bind_address is always managed by this config struct or always passed in.
+    
+    dlog("Client initialization complete for %s", server_addr);
+    
+    // Start the connection process
+    if (nexus_client_connect(config) != 0) {
+        dlog("ERROR: Failed to start client connection");
+        nexus_client_cleanup(config);
+        return -1;
     }
-    return -1;
+    
+    dlog("Client connection initiated");
+    
+    return 0;
 }
 
+// Establish connection to remote server
 int nexus_client_connect(nexus_client_config_t *config) {
     if (!config) return -1;
+    
+    // Print client socket info for debugging
+    char local_ip[INET6_ADDRSTRLEN];
+    struct sockaddr_in6 local_addr;
+    socklen_t local_len = sizeof(local_addr);
+    
+    if (getsockname(config->sock, (struct sockaddr*)&local_addr, &local_len) == 0) {
+        inet_ntop(AF_INET6, &local_addr.sin6_addr, local_ip, sizeof(local_ip));
+        dlog("Client socket: local [%s]:%d, connecting to server port %d, fd=%d", 
+             local_ip, ntohs(local_addr.sin6_port), config->port, config->sock);
+    } else {
+        dlog("Failed to get client socket name: %s", strerror(errno));
+    }
+    
     dlog("Starting QUIC handshake");
 
+    // Generate and send initial packet
     uint8_t buf[65535];
     ngtcp2_path_storage ps;
     ngtcp2_path_storage_zero(&ps);
     
     ngtcp2_pkt_info pi = {0};
     
+    // Try to generate initial packet
     ssize_t n = ngtcp2_conn_write_pkt(config->conn, &ps.path, &pi,
                                      buf, sizeof(buf), get_timestamp());
     
     if (n > 0) {
-        struct sockaddr_in6 server_addr_connect = {
+        // Set up destination address
+        struct sockaddr_in6 server_addr = {
             .sin6_family = AF_INET6,
             .sin6_port = htons(config->port)
         };
         
-        if (inet_pton(AF_INET6, config->bind_address, &server_addr_connect.sin6_addr) != 1) {
+        // Convert hostname to IP address if needed
+        if (inet_pton(AF_INET6, config->bind_address, &server_addr.sin6_addr) != 1) {
             if (strcmp(config->bind_address, "localhost") == 0 || strcmp(config->bind_address, "127.0.0.1") == 0) {
-                inet_pton(AF_INET6, "::1", &server_addr_connect.sin6_addr);
+                inet_pton(AF_INET6, "::1", &server_addr.sin6_addr);
+                dlog("Using IPv6 ::1 for localhost");
             } else {
                 dlog("ERROR: Invalid IPv6 address: %s", config->bind_address);
                 return -1;
             }
         }
+        
+        char server_ip[INET6_ADDRSTRLEN];
+        inet_ntop(AF_INET6, &server_addr.sin6_addr, server_ip, sizeof(server_ip));
+        dlog("Client sending initial packet to server [%s]:%d", 
+             server_ip, ntohs(server_addr.sin6_port));
 
+        // Print first few bytes of the packet for debugging
+        if (n >= 8) {
+            dlog("Initial packet: %02X %02X %02X %02X %02X %02X %02X %02X", 
+                 buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]);
+        }
+
+        // Send the packet
         ssize_t sent = sendto(config->sock, buf, n, 0,
-                             (struct sockaddr*)&server_addr_connect, sizeof(server_addr_connect));
+                             (struct sockaddr*)&server_addr, sizeof(server_addr));
         
         if (sent < 0) {
             dlog("ERROR: Failed to send initial packet: %s", strerror(errno));
             return -1;
         }
         dlog("Sent initial handshake packet (%zd bytes)", sent);
-    } else if (n < 0 && n != NGTCP2_ERR_CALLBACK_FAILURE) { 
-        dlog("ERROR: ngtcp2_conn_write_pkt failed to generate initial packet: %s", ngtcp2_strerror((int)n));
+    } else if (n < 0) {
+        dlog("ERROR: Failed to generate initial packet: %s", ngtcp2_strerror((int)n));
         return -1;
     }
-
 
     return 0;
 }
@@ -743,5 +784,29 @@ static int client_get_path_challenge_data(ngtcp2_conn *conn, uint8_t *data, void
     }
     
     return 0;
+}
+
+// Function to send a raw NEXUS packet and receive a response
+// THIS IS A STUB IMPLEMENTATION
+ssize_t nexus_client_send_receive_raw_packet(
+    const char *server_address, 
+    uint16_t server_port, 
+    const uint8_t *request_packet_data, 
+    size_t request_packet_len, 
+    uint8_t **response_packet_data
+) {
+    dlog("STUB: nexus_client_send_receive_raw_packet called for server %s:%u", server_address, server_port);
+    dlog("STUB: Would send %zu bytes.", request_packet_len);
+
+    // Suppress unused parameter warnings for the stub
+    (void)request_packet_data;
+
+    if (response_packet_data) {
+        *response_packet_data = NULL; // Ensure it's NULL if we fail
+    }
+
+    // Simulate failure: no response received
+    fprintf(stderr, "STUB: Simulating failure in nexus_client_send_receive_raw_packet. No response.\n");
+    return -1; 
 }
 

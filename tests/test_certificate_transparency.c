@@ -279,8 +279,12 @@ static void test_network_context_integration(void) {
     
     network_context_t net_ctx;
     memset(&net_ctx, 0, sizeof(network_context_t));
-    net_ctx.mode = strdup("private");
+    net_ctx.mode = 0; // 0 = private mode
     net_ctx.hostname = strdup("localhost");
+    
+    // Initialize network context components
+    int result = init_network_context_components(&net_ctx);
+    assert(result == 0);
 
     ct_log_t *log = init_certificate_transparency(&net_ctx);
     assert(log != NULL);
@@ -308,8 +312,8 @@ static void test_network_context_integration(void) {
     assert(private_key_has_value);
     
     cleanup_certificate_transparency(log);
-    free((void*)net_ctx.mode);
-    free((void*)net_ctx.hostname);
+    cleanup_network_context_components(&net_ctx);
+    free(net_ctx.hostname);
     
     printf("Network context integration test passed\n");
 }
@@ -317,17 +321,20 @@ static void test_network_context_integration(void) {
 static void test_ca_ct_integration(void) {
     printf("Testing certificate authority and transparency integration...\n");
     
-    // Initialize network context
+    // Create a minimal network context
     network_context_t net_ctx;
     memset(&net_ctx, 0, sizeof(network_context_t));
-    net_ctx.mode = strdup("private");
+    net_ctx.mode = 0; // 0 = private mode
     net_ctx.hostname = strdup("localhost");
-    net_ctx.server = strdup("localhost");
     
-    // Initialize certificate authority
+    // Initialize network context components
+    int init_comp_result = init_network_context_components(&net_ctx);
+    assert(init_comp_result == 0);
+    
+    // Initialize the CA
     ca_context_t *ca_ctx = NULL;
-    int result = init_certificate_authority(&net_ctx, &ca_ctx);
-    assert(result == 0);
+    int init_result = init_certificate_authority(&net_ctx, &ca_ctx);
+    assert(init_result == 0);
     assert(ca_ctx != NULL);
     
     // Initialize certificate transparency log
@@ -336,7 +343,7 @@ static void test_ca_ct_integration(void) {
     
     // Request a certificate from the CA
     nexus_cert_t *cert = NULL;
-    result = handle_cert_request(ca_ctx, "integration.test.com", &cert);
+    int result = handle_cert_request(ca_ctx, "integration.test.com", &cert);
     assert(result == 0);
     assert(cert != NULL);
     
@@ -359,9 +366,8 @@ static void test_ca_ct_integration(void) {
     free_certificate(cert);
     cleanup_certificate_transparency(log);
     cleanup_certificate_authority(ca_ctx);
-    free((void*)net_ctx.mode);
-    free((void*)net_ctx.hostname);
-    free((void*)net_ctx.server);
+    cleanup_network_context_components(&net_ctx);
+    free(net_ctx.hostname);
     
     printf("CA and CT integration test passed\n");
 }

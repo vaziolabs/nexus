@@ -11,7 +11,7 @@
 
 // Include ngtcp2 v1.12.0
 #include <ngtcp2/ngtcp2.h>
-#include "ngtcp2_compat.h" // Compatibility layer for ngtcp2 v1.12.0
+#include "../include/ngtcp2_compat.h" // Compatibility layer for ngtcp2 v1.12.0
 
 /*
  * IMPORTANT: This project requires version 1.12.0 of ngtcp2.
@@ -21,14 +21,16 @@
  */
 
 // Project headers
-#include "system.h"
-#include "certificate_authority.h"
-#include "nexus_node.h"
-#include "network_context.h"
-#include "tld_manager.h"
-#include "debug.h" // For dlog
-#include "config_manager.h" // Added for configuration management
-#include "cli_interface.h" // Added for CLI functionality
+#include "../include/system.h"
+#include "../include/certificate_authority.h"
+#include "../include/nexus_node.h"
+#include "../include/network_context.h"
+#include "../include/tld_manager.h"
+#include "../include/debug.h" // For dlog
+#include "../include/config_manager.h" // Added for configuration management
+#include "../include/cli_interface.h" // Added for CLI functionality
+#include "../include/utils.h"           // For utility functions like get_timestamp
+#include "../include/dns_resolver.h"    // For DNS resolver functions
 
 // Add global variable for clean shutdown
 static volatile int global_running = 1;
@@ -123,10 +125,7 @@ void cleanup_multi_network(void) {
         }
         
         if (global_multi_network->contexts[i]) {
-            cleanup_network_context_components(global_multi_network->contexts[i]);
-            free((void*)global_multi_network->contexts[i]->mode);
-            free((void*)global_multi_network->contexts[i]->hostname);
-            free((void*)global_multi_network->contexts[i]->server);
+            cleanup_network_context(global_multi_network->contexts[i]);
             free(global_multi_network->contexts[i]);
         }
     }
@@ -197,9 +196,7 @@ int start_node_from_profile(network_profile_t *profile) {
     ca_context_t* ca_ctx = NULL;
     if (init_certificate_authority(net_ctx, &ca_ctx) != 0) {
         fprintf(stderr, "Failed to initialize certificate authority for profile %s\n", profile->name);
-        free((void*)net_ctx->mode);
-        free((void*)net_ctx->hostname);
-        free((void*)net_ctx->server);
+        free(net_ctx->hostname);
         free(net_ctx);
         return -1;
     }
@@ -210,9 +207,7 @@ int start_node_from_profile(network_profile_t *profile) {
     if (status != 0) {
         fprintf(stderr, "Failed to initialize node for profile %s\n", profile->name);
         cleanup_certificate_authority(ca_ctx);
-        free((void*)net_ctx->mode);
-        free((void*)net_ctx->hostname);
-        free((void*)net_ctx->server);
+        free(net_ctx->hostname);
         free(net_ctx);
         return -1;
     }
@@ -221,9 +216,7 @@ int start_node_from_profile(network_profile_t *profile) {
     if (add_network_to_multi_network(net_ctx, node) != 0) {
         fprintf(stderr, "Failed to add network to multi-network for profile %s\n", profile->name);
         cleanup_node(node);
-        free((void*)net_ctx->mode);
-        free((void*)net_ctx->hostname);
-        free((void*)net_ctx->server);
+        free(net_ctx->hostname);
         free(net_ctx);
         return -1;
     }
@@ -500,41 +493,35 @@ int main(int argc, char *argv[]) {
         if (!node_hostname) node_hostname = "localhost";
         if (!node_server) node_server = "localhost";
         
-        net_ctx = malloc(sizeof(network_context_t));
-        if (!net_ctx) {
-            fprintf(stderr, "Failed to allocate network context\n");
-            return 1;
+        // Create a new network context
+        net_ctx = NULL;
+        
+        int mode;
+        if (strcmp(node_mode, "private") == 0) {
+            mode = 0;
+        } else if (strcmp(node_mode, "public") == 0) {
+            mode = 1;
+        } else if (strcmp(node_mode, "federated") == 0) {
+            mode = 2;
+        } else {
+            mode = -1; // Unknown mode
         }
         
-        memset(net_ctx, 0, sizeof(network_context_t));
-        
-        net_ctx->mode = strdup(node_mode);
-        net_ctx->hostname = strdup(node_hostname);
-        net_ctx->server = strdup(node_server);
-        
-        if (init_network_context_components(net_ctx) != 0) {
-            fprintf(stderr, "Failed to initialize network context components\n");
-            free((void*)net_ctx->mode);
-            free((void*)net_ctx->hostname);
-            free((void*)net_ctx->server);
-            free(net_ctx);
+        if (init_network_context(&net_ctx, mode, node_hostname) != 0) {
+            dlog("Failed to initialize network context with direct parameters");
             return 1;
         }
     }
 
     printf("Initializing NEXUS node\n");
-    printf("Mode: %s\n", net_ctx->mode);
+    printf("Mode: %d\n", net_ctx->mode); // Print mode as int
     printf("Hostname: %s\n", net_ctx->hostname);
-    printf("Server: %s\n", net_ctx->server);
 
     // Initialize CA before starting network threads
     ca_context_t* ca_ctx;
     if (init_certificate_authority(net_ctx, &ca_ctx) != 0) {
         fprintf(stderr, "Failed to initialize certificate authority\n");
-        cleanup_network_context_components(net_ctx);
-        free((void*)net_ctx->mode);
-        free((void*)net_ctx->hostname);
-        free((void*)net_ctx->server);
+        cleanup_network_context(net_ctx);
         free(net_ctx);
         return 1;
     }
@@ -545,18 +532,15 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Failed to initialize node\n");
         // Cleanup components before exiting
         cleanup_certificate_authority(ca_ctx);
-        cleanup_network_context_components(net_ctx);
-        free((void*)net_ctx->mode);
-        free((void*)net_ctx->hostname);
-        free((void*)net_ctx->server);
+        cleanup_network_context(net_ctx);
         free(net_ctx);
         return 1;
     }
 
     // If --register-tld was passed, and we are in a mode that connects to a server
     if (tld_to_register && 
-        (strcmp(net_ctx->mode, "private") == 0 || strcmp(net_ctx->mode, "federated") == 0) && 
-        strcmp(net_ctx->hostname, net_ctx->server) != 0) {
+        (net_ctx->mode == 0 || net_ctx->mode == 2) && // Check mode as int
+        strcmp(net_ctx->hostname, node_server) != 0) { // Compare hostname with node_server directly
         
         dlog("Main: Attempting to register TLD '%s'. Waiting for client connection...", tld_to_register);
         
@@ -602,12 +586,9 @@ int main(int argc, char *argv[]) {
     
     // Clean up
     cleanup_node(node);
-    cleanup_network_context_components(net_ctx);
+    cleanup_network_context(net_ctx);
     cleanup_certificate_authority(ca_ctx);
     
-    free((void*)net_ctx->mode);
-    free((void*)net_ctx->hostname);
-    free((void*)net_ctx->server);
     free(net_ctx);
     
     // Clean up config manager if it was initialized

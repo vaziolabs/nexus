@@ -13,9 +13,8 @@ static void test_network_context_initialization(void) {
     memset(&net_ctx, 0, sizeof(network_context_t));
     
     // Set required fields
-    net_ctx.mode = strdup("private");
+    net_ctx.mode = 0; // 0 = private mode
     net_ctx.hostname = strdup("localhost");
-    net_ctx.server = strdup("localhost");
     
     // Initialize components
     int result = init_network_context_components(&net_ctx);
@@ -32,9 +31,7 @@ static void test_network_context_initialization(void) {
     }
     
     // Clean up base fields
-    free((void*)net_ctx.mode);
-    free((void*)net_ctx.hostname);
-    free((void*)net_ctx.server);
+    free(net_ctx.hostname);
     
     printf("Network context initialization test completed\n");
 }
@@ -42,33 +39,19 @@ static void test_network_context_initialization(void) {
 static void test_network_context_mode_operations(void) {
     printf("Running test_network_context_mode_operations...\n");
     network_context_t net_ctx;
+    memset(&net_ctx, 0, sizeof(network_context_t));
 
     // Test private mode
-    net_ctx.mode = "private";
-    // int is_private = is_private_mode(&net_ctx); // Function doesn't exist
-    // assert(is_private == 1);
-    assert(strcmp(net_ctx.mode, "private") == 0); // Direct check
+    net_ctx.mode = 0;
+    assert(net_ctx.mode == 0); // Direct check for private mode
 
     // Test public mode
-    net_ctx.mode = "public";
-    // int is_public = is_public_mode(&net_ctx); // Function doesn't exist
-    // assert(is_public == 1);
-    assert(strcmp(net_ctx.mode, "public") == 0); // Direct check
+    net_ctx.mode = 1;
+    assert(net_ctx.mode == 1); // Direct check for public mode
 
     // Test federated mode
-    net_ctx.mode = "federated";
-    // int is_federated = is_federated_mode(&net_ctx); // Function doesn't exist
-    // assert(is_federated == 1);
-    assert(strcmp(net_ctx.mode, "federated") == 0); // Direct check
-
-    // Test server mode (assuming server field indicates this)
-    net_ctx.server = "someserver.local"; // Example: server is set
-    // int is_server = is_server_mode(&net_ctx); // Function doesn't exist
-    // assert(is_server == 1); 
-    assert(net_ctx.server != NULL); // Direct check if server field implies server mode for test
-
-    net_ctx.mode = NULL; // Reset for safety, though not strictly necessary for this test scope
-    net_ctx.server = NULL;
+    net_ctx.mode = 2;
+    assert(net_ctx.mode == 2); // Direct check for federated mode
 
     printf("test_network_context_mode_operations passed (direct checks).\n");
 }
@@ -98,10 +81,76 @@ static void test_network_connection_state() {
 }
 */
 
+// Create a minimal network context for testing initialization and cleanup
+static void test_network_context_init_and_cleanup(void) {
+    printf("Testing network context initialization and cleanup...\n");
+    
+    // Create network context
+    network_context_t net_ctx;
+    memset(&net_ctx, 0, sizeof(network_context_t));
+    net_ctx.mode = 0; // 0 = private mode
+    net_ctx.hostname = strdup("localhost");
+    
+    // Initialize components
+    int result = init_network_context_components(&net_ctx);
+    assert(result == 0);
+    
+    // Verify components were properly initialized
+    assert(net_ctx.dns_cache != NULL);
+    assert(net_ctx.tld_manager != NULL);
+    
+    // Test cleanup
+    cleanup_network_context_components(&net_ctx);
+    
+    // Verify that components have been properly cleaned up
+    assert(net_ctx.dns_cache == NULL);
+    assert(net_ctx.tld_manager == NULL);
+    
+    // Clean up
+    free(net_ctx.hostname);
+    
+    printf("Network context initialization and cleanup test passed\n");
+}
+
+// Test connection status checking
+static void test_connection_status(void) {
+    printf("Testing connection status checking...\n");
+    
+    // Create contexts with different modes
+    
+    // Private mode
+    network_context_t net_ctx;
+    memset(&net_ctx, 0, sizeof(network_context_t));
+    net_ctx.mode = 0; // 0 = private mode
+    net_ctx.hostname = strdup("localhost");
+    
+    // Test connection status check (won't actually connect, just checks printing)
+    check_connection_status(&net_ctx);
+    
+    // Clean up
+    free(net_ctx.hostname);
+    
+    // Public mode
+    memset(&net_ctx, 0, sizeof(network_context_t));
+    net_ctx.mode = 1; // 1 = public mode
+    net_ctx.hostname = strdup("localhost");
+    
+    // Test connection status check
+    check_connection_status(&net_ctx);
+    
+    // Clean up
+    free(net_ctx.hostname);
+    
+    printf("Connection status test passed\n");
+}
+
 void test_network_context_all(void) {
     printf("\n=== Running Network Context Tests ===\n");
+    
     test_network_context_initialization();
     test_network_context_mode_operations();
-    // test_network_connection_state(); // Commented out as it relies on non-existent functions
-    printf("All network context tests passed (some functionalities might be stubbed or directly checked).\n");
+    test_network_context_init_and_cleanup();
+    test_connection_status();
+    
+    printf("All network context tests completed successfully\n");
 } 

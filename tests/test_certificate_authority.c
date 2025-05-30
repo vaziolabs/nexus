@@ -13,9 +13,8 @@ static void test_ca_initialization(void) {
     // Create a minimal network context
     network_context_t net_ctx;
     memset(&net_ctx, 0, sizeof(network_context_t));
-    net_ctx.mode = strdup("private");
+    net_ctx.mode = 0; // 0 = private mode
     net_ctx.hostname = strdup("localhost");
-    net_ctx.server = strdup("localhost");
     
     // Initialize the CA
     ca_context_t *ca_ctx = NULL;
@@ -69,9 +68,7 @@ static void test_ca_initialization(void) {
     cleanup_certificate_authority(ca_ctx);
     
     // Clean up network context
-    free((void*)net_ctx.mode);
-    free((void*)net_ctx.hostname);
-    free((void*)net_ctx.server);
+    free(net_ctx.hostname);
     
     printf("Certificate authority initialization test passed\n");
 }
@@ -82,9 +79,8 @@ static void test_certificate_request(void) {
     // Create a minimal network context
     network_context_t net_ctx;
     memset(&net_ctx, 0, sizeof(network_context_t));
-    net_ctx.mode = strdup("private");
+    net_ctx.mode = 0; // 0 = private mode
     net_ctx.hostname = strdup("localhost");
-    net_ctx.server = strdup("localhost");
     
     // Initialize the CA
     ca_context_t *ca_ctx = NULL;
@@ -120,9 +116,7 @@ static void test_certificate_request(void) {
     cleanup_certificate_authority(ca_ctx);
     
     // Clean up network context
-    free((void*)net_ctx.mode);
-    free((void*)net_ctx.hostname);
-    free((void*)net_ctx.server);
+    free(net_ctx.hostname);
     
     printf("Certificate request handling test passed\n");
 }
@@ -133,9 +127,8 @@ static void test_certificate_verification(void) {
     // Create a minimal network context
     network_context_t net_ctx;
     memset(&net_ctx, 0, sizeof(network_context_t));
-    net_ctx.mode = strdup("private");
+    net_ctx.mode = 0; // 0 = private mode
     net_ctx.hostname = strdup("localhost");
-    net_ctx.server = strdup("localhost");
     
     // Initialize the CA
     ca_context_t *ca_ctx = NULL;
@@ -170,9 +163,7 @@ static void test_certificate_verification(void) {
     cleanup_certificate_authority(ca_ctx);
     
     // Clean up network context
-    free((void*)net_ctx.mode);
-    free((void*)net_ctx.hostname);
-    free((void*)net_ctx.server);
+    free(net_ctx.hostname);
     
     printf("Certificate verification test passed\n");
 }
@@ -280,9 +271,8 @@ static void test_certificate_chain(void) {
     // Create a minimal network context
     network_context_t net_ctx;
     memset(&net_ctx, 0, sizeof(network_context_t));
-    net_ctx.mode = strdup("private");
+    net_ctx.mode = 0; // 0 = private mode
     net_ctx.hostname = strdup("localhost");
-    net_ctx.server = strdup("localhost");
     
     // Initialize the CA
     ca_context_t *ca_ctx = NULL;
@@ -315,9 +305,7 @@ static void test_certificate_chain(void) {
     cleanup_certificate_authority(ca_ctx);
     
     // Clean up network context
-    free((void*)net_ctx.mode);
-    free((void*)net_ctx.hostname);
-    free((void*)net_ctx.server);
+    free(net_ctx.hostname);
     
     printf("Certificate chain test passed\n");
 }

@@ -13,11 +13,15 @@ static void test_cli_command_parsing(void) {
         char *argv[] = {"nexus", "help"};
         int argc = 2;
         cli_command_t cmd;
+        char *socket_path = NULL;
+        char *config_profile_name = NULL;
         
-        assert(parse_cli_args(argc, argv, &cmd) == 0);
+        assert(parse_cli_args(argc, argv, &cmd, &socket_path, &config_profile_name) == 0);
         assert(cmd.type == CLI_CMD_HELP);
         
         free_cli_command(&cmd);
+        free(socket_path);
+        free(config_profile_name);
     }
     
     // Test status command
@@ -25,11 +29,15 @@ static void test_cli_command_parsing(void) {
         char *argv[] = {"nexus", "status"};
         int argc = 2;
         cli_command_t cmd;
+        char *socket_path = NULL;
+        char *config_profile_name = NULL;
         
-        assert(parse_cli_args(argc, argv, &cmd) == 0);
+        assert(parse_cli_args(argc, argv, &cmd, &socket_path, &config_profile_name) == 0);
         assert(cmd.type == CLI_CMD_STATUS);
         
         free_cli_command(&cmd);
+        free(socket_path);
+        free(config_profile_name);
     }
     
     // Test start command with profile
@@ -37,13 +45,17 @@ static void test_cli_command_parsing(void) {
         char *argv[] = {"nexus", "start", "testprofile"};
         int argc = 3;
         cli_command_t cmd;
+        char *socket_path = NULL;
+        char *config_profile_name = NULL;
         
-        assert(parse_cli_args(argc, argv, &cmd) == 0);
+        assert(parse_cli_args(argc, argv, &cmd, &socket_path, &config_profile_name) == 0);
         assert(cmd.type == CLI_CMD_START);
         assert(cmd.profile_name != NULL);
         assert(strcmp(cmd.profile_name, "testprofile") == 0);
         
         free_cli_command(&cmd);
+        free(socket_path);
+        free(config_profile_name);
     }
     
     // Test register-tld command
@@ -51,8 +63,10 @@ static void test_cli_command_parsing(void) {
         char *argv[] = {"nexus", "register-tld", "testprofile", "example"};
         int argc = 4;
         cli_command_t cmd;
+        char *socket_path = NULL;
+        char *config_profile_name = NULL;
         
-        assert(parse_cli_args(argc, argv, &cmd) == 0);
+        assert(parse_cli_args(argc, argv, &cmd, &socket_path, &config_profile_name) == 0);
         assert(cmd.type == CLI_CMD_REGISTER_TLD);
         assert(cmd.profile_name != NULL);
         assert(strcmp(cmd.profile_name, "testprofile") == 0);
@@ -60,6 +74,8 @@ static void test_cli_command_parsing(void) {
         assert(strcmp(cmd.param1, "example") == 0);
         
         free_cli_command(&cmd);
+        free(socket_path);
+        free(config_profile_name);
     }
     
     // Test lookup command
@@ -67,13 +83,17 @@ static void test_cli_command_parsing(void) {
         char *argv[] = {"nexus", "lookup", "example.com"};
         int argc = 3;
         cli_command_t cmd;
+        char *socket_path = NULL;
+        char *config_profile_name = NULL;
         
-        assert(parse_cli_args(argc, argv, &cmd) == 0);
+        assert(parse_cli_args(argc, argv, &cmd, &socket_path, &config_profile_name) == 0);
         assert(cmd.type == CLI_CMD_LOOKUP);
         assert(cmd.param1 != NULL);
         assert(strcmp(cmd.param1, "example.com") == 0);
         
         free_cli_command(&cmd);
+        free(socket_path);
+        free(config_profile_name);
     }
     
     // Test invalid command
@@ -81,8 +101,12 @@ static void test_cli_command_parsing(void) {
         char *argv[] = {"nexus", "invalid-command"};
         int argc = 2;
         cli_command_t cmd;
+        char *socket_path = NULL;
+        char *config_profile_name = NULL;
         
-        assert(parse_cli_args(argc, argv, &cmd) != 0);
+        assert(parse_cli_args(argc, argv, &cmd, &socket_path, &config_profile_name) != 0);
+        free(socket_path);
+        free(config_profile_name);
     }
     
     // Test missing required argument
@@ -90,8 +114,12 @@ static void test_cli_command_parsing(void) {
         char *argv[] = {"nexus", "lookup"};
         int argc = 2;
         cli_command_t cmd;
+        char *socket_path = NULL;
+        char *config_profile_name = NULL;
         
-        assert(parse_cli_args(argc, argv, &cmd) != 0);
+        assert(parse_cli_args(argc, argv, &cmd, &socket_path, &config_profile_name) != 0);
+        free(socket_path);
+        free(config_profile_name);
     }
     
     printf("CLI command parsing tests passed\n");

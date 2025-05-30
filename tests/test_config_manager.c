@@ -77,15 +77,12 @@ static void test_network_context_creation(void) {
     // Since this is a stub in our implementation, we should expect it to fail or return a minimal context
     if (result == 0) {
         assert(net_ctx != NULL);
-        assert(net_ctx->mode != NULL);
+        // Check mode is a valid value (0=private, 1=public, 2=federated)
+        assert(net_ctx->mode >= 0 && net_ctx->mode <= 2);
         assert(net_ctx->hostname != NULL);
-        assert(net_ctx->server != NULL);
         
-        // Clean up - this would normally be done with cleanup_network_context_components
-        free((void*)net_ctx->mode);
-        free((void*)net_ctx->hostname);
-        free((void*)net_ctx->server);
-        free(net_ctx);
+        // Clean up - this would normally be done with cleanup_network_context
+        cleanup_network_context(net_ctx);
     } else {
         printf("Note: create_network_context_from_profile returned %d (expected in stub implementation)\n", result);
     }

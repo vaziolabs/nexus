@@ -9,6 +9,9 @@ struct ssl_quic_method_st {
     int dummy;  // Just to have something in the struct
 };
 
+// Forward declaration of our compatibility functions
+int ngtcp2_crypto_recv_retry_cb(ngtcp2_conn *conn, const ngtcp2_pkt_hd *hd, void *user_data);
+
 // Define a dummy QUIC method structure
 // This just needs to exist since we're not actually using it
 // The real one would be provided by the OpenSSL library

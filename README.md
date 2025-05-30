@@ -3,6 +3,19 @@
 ## Overview
 NEXUS is a simple, secure, scalable DNS-over-QUIC protocol implementation designed for the hypermesh network, providing enhanced security, performance, and scalability features for distributed DNS. Beyond DNS, NEXUS is designed to evolve into a comprehensive network protocol replacement leveraging QUIC's capabilities to handle tunneling, IPv6 allocation, and NAT traversal. NEXUS now integrates Falcon post-quantum cryptography for certificate operations, providing quantum-resistant security for the entire certificate infrastructure.
 
+### Vision: Web3 DNS Service
+
+The ultimate goal of NEXUS is to power **dns.hypermesh.online**, a global Web3 DNS service that revolutionizes domain name registration and resolution:
+
+* **Simplified Domain Names**: Enable direct registration of top-level domains like "nike" or "nascar" without traditional hierarchies
+* **Web3 Integration**: Decentralized domain ownership, transfer, and management through blockchain technology
+* **Public/Private Network Management**: Allow entities to maintain both public-facing resources and private internal networks
+* **HTTP/3 Ready**: Optimized for next-generation HTTP/3 protocols (e.g., http3://nike)
+* **Post-Quantum Security**: Resistant to future quantum computing threats through Falcon cryptography
+* **Global Resilience**: Distributed architecture ensuring high availability and performance worldwide
+
+NEXUS serves as both the protocol definition and reference implementation for this next-generation DNS system.
+
 ## Current Status
 
 ### May 2025 Update
@@ -15,6 +28,30 @@ NEXUS has undergone significant stability improvements:
 - Improved test framework with comprehensive integration tests
 
 All core components are now stable and passing tests. The project is ready for further feature development focused on advanced DNS resolution, TLD mirroring, and tunneling infrastructure.
+
+## Global Web3 DNS Service: dns.hypermesh.online
+
+NEXUS is being developed with the specific goal of powering dns.hypermesh.online, a global Web3 DNS service that will provide:
+
+### Planned Features
+- **Direct TLD Registration**: Register top-level domains directly (like "nike", "nascar", etc.) without traditional DNS hierarchy constraints
+- **Blockchain-Backed Ownership**: Secure, verifiable domain ownership through decentralized ledger technology
+- **Public & Private Networking**: Each domain can manage both public-facing and private internal resources
+- **HTTP/3 Optimization**: First-class support for next-generation HTTP/3 protocols
+- **Global Distribution**: Geographically distributed infrastructure for low-latency worldwide access
+- **High Availability**: Multi-zone redundancy with automatic failover and load balancing
+- **Post-Quantum Security**: Future-proof security through Falcon cryptography integration
+
+### Deployment Timeline
+- **Phase 1** (Current): Core functionality and protocol stabilization
+- **Phase 2** (Upcoming): Advanced DNS features, persistence, and Web3 integration
+- **Phase 3**: Limited beta of dns.hypermesh.online with select partners
+- **Phase 4**: Public launch of the global service
+
+### Integration Opportunities
+- DNS providers can mirror the NEXUS network
+- Web3 applications can leverage the simplified naming system
+- Organizations can maintain their own private NEXUS networks that optionally connect to the global network
 
 ## Quick Start Guide
 
@@ -218,24 +255,26 @@ ls -la ~/.config/nexus/
 
 
 ### In Progress Components
-- [ ] **Advanced DNS Resolution Features** - Implementation of recursive/iterative resolution, broader record type support (CNAME, MX, TXT, SRV, etc.), and resolver logic.
-- [ ] **TLD Mirroring** - Robust synchronization with automatic conflict resolution
-- [ ] **Peer Discovery** - Automatic network topology mapping
-- [ ] **Metrics Collection** - Performance monitoring and optimization
-- [ ] **Tunneling Infrastructure** - Implementation of per-tunnel IPv6 allocation
-- [ ] **NAT Traversal** - Advanced traversal techniques leveraging QUIC's connection migration
-- [ ] **Multi-Zone Resilience** - Zone-based fail-over and load balancing across multiple nodes
-- [ ] **Persistence Layer** - Durable storage for DNS records with versioning and replication
-- [ ] **Advanced Security Features** - DNSSEC integration, zero-knowledge proofs
-- [ ] **Cross-Network Resolution** - Safe delegation between different network scopes with policy enforcement
-- [ ] **Performance Optimization** - Caching strategies, connection pooling, and reduced latency mechanisms
-- [ ] **API Stabilization** - Finalization of public APIs with backward compatibility guarantees
-- [ ] **Protocol Formalization** - Complete specification documentation with RFC-style protocol definition
-- [ ] **Extended CLI Capabilities** - Advanced network management and diagnostic tools
-- [ ] **Scalability Testing** - Large-scale deployment testing with thousands of concurrent connections
-- [ ] **Error Handling Improvements** - Comprehensive error recovery with graceful degradation
-- [ ] **Logging & Diagnostics** - Enhanced logging system with structured output and severity levels
-- [ ] **Documentation** - Comprehensive user, developer, and protocol documentation
+- [ ] **Advanced DNS Resolution Features** - Implementation of recursive/iterative resolution, broader record type support (CNAME, MX, TXT, SRV, etc.), and resolver logic. PRIORITY: HIGH - Core functionality for a usable DNS service.
+- [ ] **TLD Mirroring & Replication** - Robust synchronization with automatic conflict resolution and global distribution for the dns.hypermesh.online service. PRIORITY: HIGH - Critical for consistent global state.
+- [ ] **Persistence Layer** - Durable storage for DNS records with versioning, replication, and backup mechanisms. PRIORITY: HIGH - Essential for reliable service operation.
+- [ ] **Protocol Formalization** - Complete specification documentation with RFC-style protocol definition for the Web3 DNS standard. PRIORITY: HIGH - Needed for ecosystem adoption.
+- [ ] **Web3 Name Registration System** - Smart contract integration for decentralized domain registration, transfer, and management of global TLDs like "nike" or "nascar". PRIORITY: HIGH - Core feature for Web3 DNS service.
+- [ ] **Tunneling Infrastructure** - Implementation of per-tunnel IPv6 allocation for private network connectivity. PRIORITY: MEDIUM - Enables advanced networking features.
+- [ ] **NAT Traversal** - Advanced traversal techniques leveraging QUIC's connection migration. PRIORITY: MEDIUM - Improves connectivity in complex networks.
+- [ ] **Performance Optimization** - Caching strategies, connection pooling, and reduced latency mechanisms. PRIORITY: MEDIUM - Critical for production-grade service.
+- [ ] **Scalability Testing** - Large-scale deployment testing with thousands of concurrent connections. PRIORITY: MEDIUM - Required before full public launch.
+- [ ] **Peer Discovery** - Automatic network topology mapping. PRIORITY: MEDIUM - Improves network resilience.
+- [ ] **Multi-Zone Resilience** - Zone-based fail-over and load balancing across multiple nodes. PRIORITY: MEDIUM - Ensures high availability for the global service.
+- [ ] **Global Deployment Architecture** - Infrastructure design for dns.hypermesh.online with geographic distribution, load balancing, and failover. PRIORITY: MEDIUM - Required for production deployment.
+- [ ] **Metrics Collection** - Performance monitoring and optimization. PRIORITY: LOW - Helpful for maintaining service quality.
+- [ ] **Advanced Security Features** - DNSSEC integration, zero-knowledge proofs. PRIORITY: LOW - Enhances security posture.
+- [ ] **Cross-Network Resolution** - Safe delegation between different network scopes with policy enforcement. PRIORITY: LOW - Enables advanced use cases.
+- [ ] **Error Handling Improvements** - Comprehensive error recovery with graceful degradation. PRIORITY: LOW - Improves stability in edge cases.
+- [ ] **Logging & Diagnostics** - Enhanced logging system with structured output and severity levels. PRIORITY: LOW - Helps with troubleshooting.
+- [ ] **Documentation** - Comprehensive user, developer, and protocol documentation. PRIORITY: LOW - Important for adoption and usability.
+- [ ] **Extended CLI Capabilities** - Advanced network management and diagnostic tools. PRIORITY: LOW - Improves administrative experience.
+- [ ] **API Stabilization** - Finalization of public APIs with backward compatibility guarantees. PRIORITY: LOW - Important for ecosystem development.
 
 ### Current Implementation Notes
 - CLI interface supports all required commands for testing and operation
@@ -332,6 +371,18 @@ This test specifically focuses on:
 - Verification of Falcon certificate validation during handshakes
 - DNS resolution with Falcon certificate verification
 - Data transfer with post-quantum security
+
+Additionally, we now provide a standalone IPv6 Falcon certificate test:
+
+```bash
+./tests/run_ipv6_falcon_test.sh
+```
+
+This test verifies:
+- Generation of Falcon-signed certificates in an IPv6 environment
+- Proper certificate verification using Falcon post-quantum signatures
+- Cross-verification of certificates between different CAs
+- Basic IPv6 functionality even when native IPv6 is not available (using fallback mode)
 
 ### Manual Testing
 

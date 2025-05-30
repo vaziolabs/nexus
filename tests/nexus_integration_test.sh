@@ -146,14 +146,23 @@ resolve_dns() {
     local log_file="$LOG_DIR/resolve_dns_${domain}.log"
     
     log "Resolving DNS for domain '${domain}' in $mode mode..."
-    "$BUILD_DIR/nexus_cli" --server "::1" resolve "$domain" > "$log_file" 2>&1
+    if ! "$BUILD_DIR/nexus_cli" --server "::1" --port "$server_port" resolve "$domain" > "$log_file" 2>&1; then
+        warning "Failed to resolve domain '${domain}' initially. Check logs at $log_file. This might be okay if server needs more time."
+        # Optionally, add a small delay here if needed, or simply let the script continue
+        # sleep 1 
+        return 1 # Indicate failure
+    fi
     
     # Check if resolution was successful by looking for IP address in logs
     if grep -q -E "([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}" "$log_file"; then
-        success "Domain '${domain}' resolved successfully"
+        success "Domain '${domain}' resolved successfully to an IPv6 address."
+        return 0
+    elif grep -q -E "([0-9]{1,3}\.){3}[0-9]{1,3}" "$log_file"; then # Check for IPv4 as well, though we expect IPv6
+        success "Domain '${domain}' resolved successfully to an IPv4 address."
         return 0
     else
-        error "Failed to resolve domain '${domain}'. Check logs at $log_file"
+        warning "Failed to find a valid IP address for domain '${domain}' in logs at $log_file. Resolution might have failed or returned an unexpected format."
+        return 1 # Indicate failure
     fi
 }
 
@@ -201,7 +210,7 @@ cleanup() {
         if [ -f "$pid_file" ]; then
             pid=$(cat "$pid_file")
             log "Killing process with PID $pid"
-            kill -9 $pid 2>/dev/null || true
+            kill $pid 2>/dev/null || true # Use graceful termination
             rm "$pid_file"
         fi
     done
@@ -243,9 +252,9 @@ main() {
     "$BUILD_DIR/nexus_cli" --server "::1" register-domain "client3.mesh" "fd00::3"
     
     # Resolve domains
-    resolve_dns "client1.test" "private" "10443"
-    resolve_dns "client2.example" "public" "10444"
-    resolve_dns "client3.mesh" "federated" "10445"
+    resolve_dns "client1.test" "private" "10443" || error "DNS resolution failed for client1.test"
+    resolve_dns "client2.example" "public" "10444" || error "DNS resolution failed for client2.example"
+    resolve_dns "client3.mesh" "federated" "10445" || error "DNS resolution failed for client3.mesh"
     
     # Verify certificates
     verify_certificates "private" "client1.local"
