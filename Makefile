@@ -196,7 +196,7 @@ help:
 # Moved these definitions before their first use in $(TEST_TARGET)
 # Filter out standalone test files from the main test suite sources
 ALL_TEST_CSRCS := $(wildcard $(TESTS_DIR)/*.c)
-STANDALONE_TEST_CSRCS := $(TESTS_DIR)/test_quic_handshake.c $(TESTS_DIR)/test_ipv6_quic_handshake.c $(TESTS_DIR)/test_ipv6_falcon_handshake.c $(TESTS_DIR)/test_falcon_verify.c $(TESTS_DIR)/standalone_ca_test.c $(TESTS_DIR)/standalone_ct_test.c
+STANDALONE_TEST_CSRCS := $(TESTS_DIR)/test_quic_handshake.c $(TESTS_DIR)/test_ipv6_quic_handshake.c $(TESTS_DIR)/test_ipv6_falcon_handshake.c $(TESTS_DIR)/test_falcon_verify.c $(TESTS_DIR)/standalone_ca_test.c $(TESTS_DIR)/standalone_ct_test.c $(TESTS_DIR)/test_ipv6_falcon_cert.c
 TEST_SUITE_CSRCS := $(filter-out $(STANDALONE_TEST_CSRCS), $(ALL_TEST_CSRCS))
 
 TEST_SUITE_OBJS := $(TEST_SUITE_CSRCS:$(TESTS_DIR)/%.c=$(BUILD_DIR)/%.o)

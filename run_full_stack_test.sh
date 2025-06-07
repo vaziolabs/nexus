@@ -44,6 +44,14 @@ if [ $? -ne 0 ]; then
 fi
 print_status "Build completed successfully."
 
+# Generate a dummy certificate and key for the tests
+print_status "Generating dummy certificate for tests..."
+openssl req -x509 -newkey rsa:2048 -nodes -keyout server.key -out server.cert -subj "/CN=localhost"
+if [ $? -ne 0 ]; then
+    print_error "Failed to generate dummy certificate. Exiting."
+    exit 1
+fi
+
 # Verify the binary exists
 if [ ! -f "$BUILD_DIR/nexus" ]; then
     print_error "NEXUS binary not found at $BUILD_DIR/nexus"
@@ -160,6 +168,7 @@ print_status "Second server started with PID $SERVER2_PID"
 print_status "Cleaning up..."
 kill $SERVER_PID
 kill $SERVER2_PID
+rm -f server.cert server.key
 sleep 1
 
 print_status "Full stack test completed successfully."

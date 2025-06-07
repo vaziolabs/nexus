@@ -1,6 +1,7 @@
 #include "../include/network_context.h"
 #include "../include/debug.h"
 #include "../include/tld_manager.h" // For init_tld_manager and cleanup_tld_manager
+#include "../include/certificate_authority.h" // For cleanup_certificate_authority
 #include <string.h>
 #include <stdlib.h> // For malloc, free
 #include <stdio.h>  // For fprintf, stderr
@@ -113,6 +114,12 @@ int init_network_context_components(network_context_t* net_ctx) {
 
 void cleanup_network_context_components(network_context_t* net_ctx) {
     if (!net_ctx) return;
+
+    // Cleanup Certificate Authority
+    if (net_ctx->ca_ctx) {
+        cleanup_certificate_authority(net_ctx->ca_ctx);
+        net_ctx->ca_ctx = NULL;
+    }
 
     // Cleanup TLD Manager
     if (net_ctx->tld_manager) {

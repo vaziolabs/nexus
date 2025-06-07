@@ -2,13 +2,12 @@
 #define CERTIFICATE_AUTHORITY_H
 
 #include <stdint.h>
-#include "system.h"
-#include <pthread.h>
-#include <string.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include "network_context.h"  // For network_context_t definition
-#include "extern/falcon/falcon.h"  // Include Falcon header directly
+#include <time.h>
+#include <openssl/x509.h>
+#include <openssl/evp.h>
+
+// Forward declaration - don't redefine the typedef
+struct network_context_t;
 
 /**
  * @file certificate_authority.h
@@ -24,6 +23,8 @@
  * which provides 256 bits of quantum security.
  */
 
+#define FALCON_SIG_LEN 1280 // Example for Falcon-512
+
 // Certificate types
 typedef enum {
     CERT_TYPE_SELF_SIGNED,    // For private networks
@@ -31,41 +32,31 @@ typedef enum {
     CERT_TYPE_PUBLIC          // For public network CAs
 } cert_type_t;
 
-// Falcon-1024 key structure
-typedef struct {
-    uint8_t public_key[FALCON_PUBKEY_SIZE(10)];  // Falcon-1024 public key size
-    uint8_t private_key[FALCON_PRIVKEY_SIZE(10)]; // Falcon-1024 private key size
-} falcon_keys_t;
-
-// Certificate structure
-struct nexus_cert {
-    char *common_name;
-    uint8_t signature[FALCON_SIG_COMPRESSED_MAXSIZE(10)];   // Falcon-1024 compressed signature
-    uint64_t valid_from;
-    uint64_t valid_until;
+// Structure for a NEXUS certificate
+typedef struct nexus_cert_s {
+    char* common_name;
+    char* subject_alt_name;
+    time_t not_before;
+    time_t not_after;
+    uint8_t* signature;
+    size_t signature_len;
+    X509 *x509;
     cert_type_t cert_type;
-    // Other certificate fields
-};
+} nexus_cert_t;
 
 // CA context structure
-typedef struct {
-    struct nexus_cert *ca_cert;
-    falcon_keys_t *keys;
+typedef struct ca_context_s {
+    nexus_cert_t *ca_cert;
+    EVP_PKEY *falcon_pkey;
     char *authority_name;
-    // Other CA fields
 } ca_context_t;
 
 // Function declarations
-int init_certificate_authority(network_context_t* net_ctx, ca_context_t** ca_ctx);
-int handle_cert_request(ca_context_t* ca_ctx, const char* hostname, nexus_cert_t** cert);
-int save_certificate(nexus_cert_t* cert, const char* filename);
-nexus_cert_t* load_certificate(const char* filename);
-void free_certificate(nexus_cert_t* cert);
+int init_certificate_authority(struct network_context_t* net_ctx, ca_context_t** ca_ctx);
+int ca_issue_certificate(ca_context_t* ca_ctx, const char* common_name, nexus_cert_t** cert_out);
 int verify_certificate(nexus_cert_t* cert, ca_context_t* ca);
-int sign_certificate(nexus_cert_t* cert, ca_context_t* ca);
-int add_federation_signature(nexus_cert_t* cert, const uint8_t* signature);
+void free_certificate(nexus_cert_t* cert);
 void cleanup_certificate_authority(ca_context_t* ca_ctx);
-void free_ca_context(ca_context_t* ca_ctx);
 
 // New functions for Falcon integration
 int generate_falcon_keypair(uint8_t *public_key, uint8_t *private_key);

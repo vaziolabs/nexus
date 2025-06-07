@@ -136,8 +136,10 @@ void* client_thread_func(void* arg) {
     if (node->net_ctx->mode == 0 || node->net_ctx->mode == 2) {
         
         // In private or federated mode, we need to connect to a server
-        const char *target_server = node->net_ctx->ip_address; // Use the IP from the network context
-        int target_port = node->net_ctx->server_port;  // Use the server port from the network context
+        // For private mode, connect to localhost (same machine)
+        // For federated mode, would connect to a remote server
+        const char *target_server = "::1"; // Use IPv6 localhost
+        int target_port = node->server_config.port;  // Connect to our own server port
         
         dlog("Mode: %d", node->net_ctx->mode);
         dlog("Initializing client connection to %s:%d", target_server, target_port);
@@ -223,6 +225,5 @@ void cleanup_node(nexus_node_t *node) {
         node->client_config.sock = -1;
     }
     
-    // Free the node structure itself
-    free(node);
+    // Note: Don't free the node structure itself - let the caller handle it
 }

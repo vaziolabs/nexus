@@ -122,6 +122,7 @@ void cleanup_multi_network(void) {
     for (int i = 0; i < global_multi_network->count; i++) {
         if (global_multi_network->nodes[i]) {
             cleanup_node(global_multi_network->nodes[i]);
+            free(global_multi_network->nodes[i]);  // Free the node structure
         }
         
         if (global_multi_network->contexts[i]) {
@@ -194,20 +195,23 @@ int start_node_from_profile(network_profile_t *profile) {
     
     // Initialize CA
     ca_context_t* ca_ctx = NULL;
-    if (init_certificate_authority(net_ctx, &ca_ctx) != 0) {
+    if (init_certificate_authority((struct network_context_t*)net_ctx, &ca_ctx) != 0) {
         fprintf(stderr, "Failed to initialize certificate authority for profile %s\n", profile->name);
         free(net_ctx->hostname);
         free(net_ctx);
         return -1;
     }
     
+    // Store CA context in network context
+    net_ctx->ca_ctx = ca_ctx;
+    
     // Initialize node
     nexus_node_t *node = NULL;
     int status = init_node(net_ctx, ca_ctx, profile->server_port, profile->client_port, &node);
     if (status != 0) {
         fprintf(stderr, "Failed to initialize node for profile %s\n", profile->name);
-        cleanup_certificate_authority(ca_ctx);
-        free(net_ctx->hostname);
+        // CA context will be cleaned up by cleanup_network_context
+        cleanup_network_context(net_ctx);
         free(net_ctx);
         return -1;
     }
@@ -216,7 +220,8 @@ int start_node_from_profile(network_profile_t *profile) {
     if (add_network_to_multi_network(net_ctx, node) != 0) {
         fprintf(stderr, "Failed to add network to multi-network for profile %s\n", profile->name);
         cleanup_node(node);
-        free(net_ctx->hostname);
+        free(node);  // Free the node structure
+        cleanup_network_context(net_ctx);
         free(net_ctx);
         return -1;
     }
@@ -519,19 +524,21 @@ int main(int argc, char *argv[]) {
 
     // Initialize CA before starting network threads
     ca_context_t* ca_ctx;
-    if (init_certificate_authority(net_ctx, &ca_ctx) != 0) {
+    if (init_certificate_authority((struct network_context_t*)net_ctx, &ca_ctx) != 0) {
         fprintf(stderr, "Failed to initialize certificate authority\n");
         cleanup_network_context(net_ctx);
         free(net_ctx);
         return 1;
     }
 
+    // Store CA context in network context
+    net_ctx->ca_ctx = ca_ctx;
+
     printf("Initializing node\n");
     int status = init_node(net_ctx, ca_ctx, NEXUS_SERVER_PORT, NEXUS_CLIENT_PORT, &node);
     if (status != 0) {
         fprintf(stderr, "Failed to initialize node\n");
-        // Cleanup components before exiting
-        cleanup_certificate_authority(ca_ctx);
+        // CA context will be cleaned up by cleanup_network_context
         cleanup_network_context(net_ctx);
         free(net_ctx);
         return 1;
@@ -586,8 +593,9 @@ int main(int argc, char *argv[]) {
     
     // Clean up
     cleanup_node(node);
+    free(node);  // Now explicitly free the node structure
     cleanup_network_context(net_ctx);
-    cleanup_certificate_authority(ca_ctx);
+    // Note: CA context is now stored in net_ctx and will be cleaned up by cleanup_network_context
     
     free(net_ctx);
     

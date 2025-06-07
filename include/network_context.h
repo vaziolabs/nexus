@@ -2,47 +2,41 @@
 #define NETWORK_CONTEXT_H
 
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdint.h>
-#include "tld_manager.h"
 #include "dns_types.h"
+#include "tld_manager.h"
 #include "dns_resolver.h"
 
 // Forward declarations to avoid circular dependencies
-struct tld_manager_s;
-struct dns_resolver_s;
-typedef struct nexus_cert nexus_cert_t;
+typedef struct nexus_cert_s nexus_cert_t;
+typedef struct ca_context_s ca_context_t;
 
 // Main network context structure
 typedef struct {
-    char* hostname;           // Hostname for this node
-    char* ip_address;         // Primary IP address for this node
-    uint16_t server_port;     // Port to bind to for server mode
-    uint16_t client_port;     // Port to bind to for client mode
-    int mode;                 // Network mode (private, public, federated)
-    dns_cache_t *dns_cache;   // DNS cache
+    int mode;                   // Network mode (e.g., private, public, federated)
+    char* hostname;             // Hostname of the local node
+    char* ip_address;           // IP address of the local node
+    int server_port;            // Port for the server to listen on
+    int client_port;            // Port for the client to connect from
+    nexus_cert_t* certificate;  // Node's certificate
     tld_manager_t *tld_manager; // TLD manager
     dns_resolver_t *dns_resolver; // DNS resolver
-    pthread_mutex_t lock;     // Lock for the context
+    ca_context_t *ca_ctx;       // Certificate authority context
+    pthread_mutex_t lock;       // Lock for the context
+    dns_cache_t *dns_cache;     // DNS cache
 } network_context_t;
 
-// Initialize a network context
-int init_network_context(network_context_t **ctx, int mode, const char *hostname);
+// Function to initialize the network context
+int init_network_context(network_context_t **out_ctx, int mode, const char *hostname);
 
-// Initialize network context components (internal)
-int init_network_context_components(network_context_t* net_ctx);
-
-// Clean up a network context and free resources
+// Function to clean up the network context
 void cleanup_network_context(network_context_t *ctx);
 
-// Clean up network context components (internal)
+// Function to initialize network context components
+int init_network_context_components(network_context_t* net_ctx);
+
+// Function to cleanup network context components
 void cleanup_network_context_components(network_context_t* net_ctx);
 
-// Check connection status
-void check_connection_status(network_context_t *net_ctx);
-
-// Configure a network context
-int configure_network_context(network_context_t *ctx, const char *hostname, 
-                             const char *ip_address, uint16_t server_port,
-                             uint16_t client_port, int mode);
-
-#endif /* NETWORK_CONTEXT_H */
+#endif // NETWORK_CONTEXT_H
