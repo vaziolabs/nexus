@@ -5,9 +5,8 @@
 #include <time.h>
 #include <openssl/x509.h>
 #include <openssl/evp.h>
-
-// Forward declaration - don't redefine the typedef
-struct network_context_t;
+#include "network_context.h"
+#include "extern/falcon/falcon.h"
 
 /**
  * @file certificate_authority.h
@@ -23,7 +22,11 @@ struct network_context_t;
  * which provides 256 bits of quantum security.
  */
 
-#define FALCON_SIG_LEN 1280 // Example for Falcon-512
+// Falcon-1024 configuration
+#define FALCON_LOGN 10  // Falcon-1024
+#define FALCON_PRIVKEY_SIZE_1024 FALCON_PRIVKEY_SIZE(FALCON_LOGN)
+#define FALCON_PUBKEY_SIZE_1024 FALCON_PUBKEY_SIZE(FALCON_LOGN)
+#define FALCON_SIG_LEN FALCON_SIG_PADDED_SIZE(FALCON_LOGN)
 
 // Certificate types
 typedef enum {
@@ -42,17 +45,23 @@ typedef struct nexus_cert_s {
     size_t signature_len;
     X509 *x509;
     cert_type_t cert_type;
+    // Falcon post-quantum signature
+    uint8_t falcon_signature[FALCON_SIG_LEN];
+    uint8_t falcon_pubkey[FALCON_PUBKEY_SIZE_1024];
 } nexus_cert_t;
 
 // CA context structure
 typedef struct ca_context_s {
     nexus_cert_t *ca_cert;
-    EVP_PKEY *falcon_pkey;
+    EVP_PKEY *falcon_pkey;  // Keep for X509 compatibility
     char *authority_name;
+    // Falcon post-quantum keys
+    uint8_t falcon_private_key[FALCON_PRIVKEY_SIZE_1024];
+    uint8_t falcon_public_key[FALCON_PUBKEY_SIZE_1024];
 } ca_context_t;
 
 // Function declarations
-int init_certificate_authority(struct network_context_t* net_ctx, ca_context_t** ca_ctx);
+int init_certificate_authority(network_context_t* net_ctx, ca_context_t** ca_ctx);
 int ca_issue_certificate(ca_context_t* ca_ctx, const char* common_name, nexus_cert_t** cert_out);
 int verify_certificate(nexus_cert_t* cert, ca_context_t* ca);
 void free_certificate(nexus_cert_t* cert);

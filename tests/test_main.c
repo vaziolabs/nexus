@@ -7,6 +7,7 @@
 #include "test_certificate_transparency.h"
 #include "test_certificate_authority.h"
 #include "test_network_context.h"
+#include "test_dns_resolver.h"
 
 // External function declarations for standalone tests
 int test_standalone_ca_main(int argc, char *argv[]);
@@ -35,6 +36,7 @@ void print_help(void) {
     printf("  nexus_tests ct               Run only Certificate Transparency tests\n");
     printf("  nexus_tests ca               Run only Certificate Authority tests\n");
     printf("  nexus_tests network          Run only Network Context tests\n");
+    printf("  nexus_tests dns              Run only DNS Resolver tests\n");
     printf("  nexus_tests quic_dns_cert    Run QUIC handshake with DNS and certificate validation test\n");
     printf("  nexus_tests integration      Run all integration tests\n");
     printf("  nexus_tests help             Show this help message\n");
@@ -49,6 +51,7 @@ int main(int argc, char *argv[]) {
     int run_ct = 1;
     int run_ca = 1;
     int run_network = 1;
+    int run_dns_resolver = 1;
     int run_quic_dns_cert = 0;  // Off by default as it requires server setup
     int run_unit_tests_only = 0;
     int run_integration_tests_only = 0;
@@ -56,7 +59,7 @@ int main(int argc, char *argv[]) {
     // If a command-line argument is provided, only run the specified test
     if (argc > 1) {
         // Reset all flags to 0 first
-        run_tld = run_packet = run_config = run_cli = run_ct = run_ca = run_network = 0;
+        run_tld = run_packet = run_config = run_cli = run_ct = run_ca = run_network = run_dns_resolver = 0;
         
         if (strcmp(argv[1], "tld") == 0) {
             run_tld = 1;
@@ -72,11 +75,13 @@ int main(int argc, char *argv[]) {
             run_ca = 1;
         } else if (strcmp(argv[1], "network") == 0) {
             run_network = 1;
+        } else if (strcmp(argv[1], "dns") == 0) {
+            run_dns_resolver = 1;
         } else if (strcmp(argv[1], "quic_dns_cert") == 0) {
             run_quic_dns_cert = 1;
         } else if (strcmp(argv[1], "unit") == 0) {
             run_unit_tests_only = 1;
-            run_tld = run_packet = run_config = run_cli = run_ct = run_ca = run_network = 1;
+            run_tld = run_packet = run_config = run_cli = run_ct = run_ca = run_network = run_dns_resolver = 1;
         } else if (strcmp(argv[1], "integration") == 0) {
             run_integration_tests_only = 1;
             run_quic_dns_cert = 1;
@@ -139,6 +144,12 @@ int main(int argc, char *argv[]) {
         if (run_network) {
             printf(COLOR_YELLOW "\n>>> Testing Network Context <<<\n" COLOR_RESET);
             test_network_context_all();
+        }
+
+        // Run DNS resolver tests
+        if (run_dns_resolver) {
+            printf(COLOR_YELLOW "\n>>> Testing DNS Resolver <<<\n" COLOR_RESET);
+            test_dns_resolver();
         }
     }
     

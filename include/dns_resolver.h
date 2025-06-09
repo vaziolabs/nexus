@@ -133,4 +133,19 @@ dns_response_status_t resolve_cname(dns_resolver_t* resolver,
                                   int* record_count,
                                   int recursion_depth);
 
+/**
+ * @brief Add a DNS record to a TLD
+ * 
+ * @param tld_manager Pointer to the TLD manager
+ * @param tld_name Name of the TLD to add the record to
+ * @param record_name Name of the record
+ * @param type Type of the DNS record
+ * @param rdata Record data
+ * @param ttl Time to live for the record
+ * @return int 0 on success, negative on error
+ */
+int add_record_to_tld(tld_manager_t* tld_manager, const char* tld_name, 
+                     const char* record_name, dns_record_type_t type, 
+                     const char* rdata, uint32_t ttl);
+
 #endif // DNS_RESOLVER_H 

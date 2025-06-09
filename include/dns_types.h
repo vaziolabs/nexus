@@ -16,7 +16,9 @@ typedef enum {
     DNS_RECORD_TYPE_AAAA = 28,  // IPv6 address
     DNS_RECORD_TYPE_TXT = 16,   // Text record
     DNS_RECORD_TYPE_MX = 15,    // Mail exchange
-    DNS_RECORD_TYPE_CNAME = 5   // Canonical name
+    DNS_RECORD_TYPE_CNAME = 5,  // Canonical name
+    DNS_RECORD_TYPE_SRV = 33,   // Service record
+    DNS_RECORD_TYPE_PTR = 12    // Pointer record (reverse DNS)
 } dns_record_type_t;
 
 // DNS Record Structure

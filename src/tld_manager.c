@@ -296,4 +296,197 @@ int add_mirror_node_to_tld(tld_t* tld, const tld_node_t* node_info) {
     tld->last_modified = time(NULL);
     // dlog_info("Added mirror node '%s' to TLD '%s'.", node_info->hostname, tld->name);
     return 0;
+}
+
+// TLD Mirroring and Synchronization Functions
+
+int request_tld_mirror(tld_manager_t* manager, const char* tld_name, const char* peer_hostname, const char* peer_ip) {
+    if (!manager || !tld_name || !peer_hostname || !peer_ip) return -1;
+    
+    // Check if TLD already exists locally
+    tld_t* existing_tld = find_tld_by_name(manager, tld_name);
+    if (existing_tld) {
+        // TLD already exists, check if peer is already a mirror node
+        for (size_t i = 0; i < existing_tld->mirror_node_count; i++) {
+            if (strcmp(existing_tld->mirror_nodes[i].hostname, peer_hostname) == 0) {
+                // Peer is already a mirror node
+                return 0;
+            }
+        }
+        
+        // Add peer as mirror node
+        tld_node_t peer_node = {
+            .hostname = strdup(peer_hostname),
+            .ip_address = strdup(peer_ip),
+            .last_seen = time(NULL)
+        };
+        
+        int result = add_mirror_node_to_tld(existing_tld, &peer_node);
+        free(peer_node.hostname);
+        free(peer_node.ip_address);
+        return result;
+    }
+    
+    // TLD doesn't exist locally, need to request full mirror from peer
+    // This would typically involve sending a network request to the peer
+    // For now, we'll create a placeholder TLD and mark the peer as authoritative
+    
+    tld_t* new_tld = register_new_tld(manager, tld_name);
+    if (!new_tld) return -1;
+    
+    tld_node_t peer_node = {
+        .hostname = strdup(peer_hostname),
+        .ip_address = strdup(peer_ip),
+        .last_seen = time(NULL)
+    };
+    
+    int result = add_authoritative_node_to_tld(new_tld, &peer_node);
+    free(peer_node.hostname);
+    free(peer_node.ip_address);
+    
+    // TODO: Send actual network request to peer to get TLD data
+    // This would be implemented with the NEXUS client API
+    
+    return result;
+}
+
+int sync_tld_update(tld_manager_t* manager, const char* tld_name, const dns_record_t* updated_record) {
+    if (!manager || !tld_name || !updated_record) return -1;
+    
+    tld_t* tld = find_tld_by_name(manager, tld_name);
+    if (!tld) return -1;
+    
+    // Update the local TLD record
+    int update_result = add_dns_record_to_tld(tld, updated_record);
+    if (update_result != 0) return update_result;
+    
+    // Propagate update to all mirror nodes
+    for (size_t i = 0; i < tld->mirror_node_count; i++) {
+        tld_node_t* mirror_node = &tld->mirror_nodes[i];
+        
+        // TODO: Send sync update to mirror node
+        // This would involve:
+        // 1. Creating a TLD_SYNC_UPDATE packet
+        // 2. Sending it to the mirror node via NEXUS client
+        // 3. Handling acknowledgment/failure
+        
+        // For now, just update the last_seen timestamp to indicate we attempted sync
+        mirror_node->last_seen = time(NULL);
+    }
+    
+    return 0;
+}
+
+int discover_tld_peers(tld_manager_t* manager, const char* tld_name, tld_node_t** discovered_peers, size_t* peer_count) {
+    if (!manager || !tld_name || !discovered_peers || !peer_count) return -1;
+    
+    *discovered_peers = NULL;
+    *peer_count = 0;
+    
+    tld_t* tld = find_tld_by_name(manager, tld_name);
+    if (!tld) return -1;
+    
+    // Combine authoritative and mirror nodes for peer discovery
+    size_t total_peers = tld->authoritative_node_count + tld->mirror_node_count;
+    if (total_peers == 0) return 0;
+    
+    tld_node_t* peers = malloc(total_peers * sizeof(tld_node_t));
+    if (!peers) return -1;
+    
+    size_t peer_index = 0;
+    
+    // Add authoritative nodes
+    for (size_t i = 0; i < tld->authoritative_node_count; i++) {
+        peers[peer_index].hostname = strdup(tld->authoritative_nodes[i].hostname);
+        peers[peer_index].ip_address = strdup(tld->authoritative_nodes[i].ip_address);
+        peers[peer_index].last_seen = tld->authoritative_nodes[i].last_seen;
+        peer_index++;
+    }
+    
+    // Add mirror nodes
+    for (size_t i = 0; i < tld->mirror_node_count; i++) {
+        peers[peer_index].hostname = strdup(tld->mirror_nodes[i].hostname);
+        peers[peer_index].ip_address = strdup(tld->mirror_nodes[i].ip_address);
+        peers[peer_index].last_seen = tld->mirror_nodes[i].last_seen;
+        peer_index++;
+    }
+    
+    *discovered_peers = peers;
+    *peer_count = total_peers;
+    
+    return 0;
+}
+
+int cleanup_stale_peers(tld_manager_t* manager, time_t stale_threshold) {
+    if (!manager) return -1;
+    
+    pthread_rwlock_wrlock(&manager->lock);
+    
+    int cleaned_count = 0;
+    
+    for (size_t tld_idx = 0; tld_idx < manager->tld_count; tld_idx++) {
+        tld_t* tld = manager->tlds[tld_idx];
+        if (!tld) continue;
+        
+        // Clean stale mirror nodes
+        size_t new_mirror_count = 0;
+        for (size_t i = 0; i < tld->mirror_node_count; i++) {
+            if (tld->mirror_nodes[i].last_seen >= stale_threshold) {
+                // Keep this node
+                if (new_mirror_count != i) {
+                    tld->mirror_nodes[new_mirror_count] = tld->mirror_nodes[i];
+                }
+                new_mirror_count++;
+            } else {
+                // Remove stale node
+                free(tld->mirror_nodes[i].hostname);
+                free(tld->mirror_nodes[i].ip_address);
+                cleaned_count++;
+            }
+        }
+        tld->mirror_node_count = new_mirror_count;
+        
+        // Clean stale authoritative nodes (more conservative)
+        size_t new_auth_count = 0;
+        for (size_t i = 0; i < tld->authoritative_node_count; i++) {
+            if (tld->authoritative_nodes[i].last_seen >= stale_threshold) {
+                // Keep this node
+                if (new_auth_count != i) {
+                    tld->authoritative_nodes[new_auth_count] = tld->authoritative_nodes[i];
+                }
+                new_auth_count++;
+            } else {
+                // Remove stale authoritative node
+                free(tld->authoritative_nodes[i].hostname);
+                free(tld->authoritative_nodes[i].ip_address);
+                cleaned_count++;
+            }
+        }
+        tld->authoritative_node_count = new_auth_count;
+        
+        if (cleaned_count > 0) {
+            tld->last_modified = time(NULL);
+        }
+    }
+    
+    pthread_rwlock_unlock(&manager->lock);
+    
+    return cleaned_count;
+}
+
+int get_tld_sync_status(tld_manager_t* manager, const char* tld_name, time_t* last_sync, size_t* peer_count) {
+    if (!manager || !tld_name) return -1;
+    
+    tld_t* tld = find_tld_by_name(manager, tld_name);
+    if (!tld) return -1;
+    
+    if (last_sync) {
+        *last_sync = tld->last_modified;
+    }
+    
+    if (peer_count) {
+        *peer_count = tld->authoritative_node_count + tld->mirror_node_count;
+    }
+    
+    return 0;
 } 

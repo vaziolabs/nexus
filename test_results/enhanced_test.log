@@ -1,0 +1,11 @@
+Enhanced NEXUS Integration Test - Sun Jun  8 12:01:45 AM CDT 2025
+[2025-06-08 00:01:45] INFO: Testing network connectivity
+[2025-06-08 00:01:45] WARNING: IPv6 loopback not available - this may be expected in some environments
+[2025-06-08 00:01:45] SUCCESS: Test 'Server port availability' PASSED
+[2025-06-08 00:01:45] INFO: Verifying build artifacts
+[2025-06-08 00:01:45] SUCCESS: Test 'NEXUS daemon binary exists' PASSED
+[2025-06-08 00:01:45] SUCCESS: Test 'NEXUS CLI binary exists' PASSED
+[2025-06-08 00:01:45] SUCCESS: Test 'NEXUS daemon is executable' PASSED
+[2025-06-08 00:01:45] SUCCESS: Test 'NEXUS CLI is executable' PASSED
+[2025-06-08 00:01:45] INFO: Testing server startup and stability
+[2025-06-08 00:01:50] ERROR: Test 'Server startup' FAILED: Server process died during startup

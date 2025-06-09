@@ -595,9 +595,11 @@ int init_nexus_server(network_context_t *net_ctx, const char *bind_address,
                 inet_pton(AF_INET6, "::1", &addr_v6.sin6_addr);
                 dlog("Using IPv6 ::1 for localhost");
             } else {
-                dlog("ERROR: Invalid address: %s", bind_address);
-                close(sock);
-                return -1;
+                // If it's not a valid IP address, assume it's a hostname
+                // For servers, we typically want to bind to all interfaces when a hostname is specified
+                // This allows the server to accept connections on any interface
+                dlog("Hostname '%s' provided, binding to all IPv6 interfaces (::)", bind_address);
+                addr_v6.sin6_addr = in6addr_any;
             }
         } else {
             dlog("Using IPv6 address: %s", bind_address);

@@ -9,7 +9,7 @@
 #include <openssl/rand.h>
 
 // Initialize certificate transparency for a network context
-ct_log_t* init_certificate_transparency(struct network_context_t *net_ctx) {
+ct_log_t* init_certificate_transparency(network_context_t *net_ctx) {
     (void)net_ctx; // Unused for now
     
     // Create a default CT log
@@ -222,7 +222,7 @@ void free_merkle_proof(merkle_proof_t* proof) {
 }
 
 // Network operations (stubs)
-int sync_ct_log_with_peers(ct_log_t *ct_log, struct network_context_t *net_ctx) {
+int sync_ct_log_with_peers(ct_log_t *ct_log, network_context_t *net_ctx) {
     (void)ct_log;
     (void)net_ctx;
     printf("WARNING: CT log peer sync not implemented\n");

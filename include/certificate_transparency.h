@@ -5,9 +5,7 @@
 #include <pthread.h>
 #include <time.h>
 #include "certificate_authority.h"
-
-// Forward declaration
-struct network_context_t;
+#include "network_context.h"
 
 // Maximum number of entries in the CT log
 #define CT_LOG_MAX_ENTRIES 10000
@@ -58,7 +56,7 @@ typedef struct {
 } merkle_proof_t;
 
 // Function declarations
-ct_log_t* init_certificate_transparency(struct network_context_t *net_ctx);
+ct_log_t* init_certificate_transparency(network_context_t *net_ctx);
 void cleanup_certificate_transparency(ct_log_t *ct_log);
 
 // CT log operations (simplified signatures)
@@ -74,6 +72,6 @@ merkle_proof_t* generate_merkle_proof(ct_log_t* log, size_t entry_index);
 void free_merkle_proof(merkle_proof_t* proof);
 
 // Network operations (stubs for now)
-int sync_ct_log_with_peers(ct_log_t *ct_log, struct network_context_t *net_ctx);
+int sync_ct_log_with_peers(ct_log_t *ct_log, network_context_t *net_ctx);
 
 #endif // CERTIFICATE_TRANSPARENCY_H 

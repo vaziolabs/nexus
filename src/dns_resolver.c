@@ -4,6 +4,10 @@
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <netinet/in.h>
 
 // Default configuration values
 #define DEFAULT_MAX_RECURSION_DEPTH 5
@@ -14,6 +18,140 @@
 #define DEFAULT_ENABLE_ITERATIVE_RESOLUTION 0
 #define DEFAULT_ENABLE_NEGATIVE_CACHING 1
 #define DEFAULT_NEGATIVE_CACHE_TTL 300
+
+// External DNS server configuration
+#define DEFAULT_EXTERNAL_DNS_SERVER "8.8.8.8"
+#define DEFAULT_EXTERNAL_DNS_PORT 53
+#define DNS_QUERY_TIMEOUT 5
+
+// Structure for external DNS query
+typedef struct {
+    char* server;
+    int port;
+    int timeout;
+} external_dns_config_t;
+
+// Forward declarations for external DNS functions
+static dns_response_status_t resolve_external_dns(const char* query_name, 
+                                                 dns_record_type_t query_type,
+                                                 dns_record_t** records,
+                                                 int* record_count,
+                                                 const external_dns_config_t* config);
+
+static int is_external_domain(const char* query_name, tld_manager_t* tld_manager);
+
+// Enhanced error handling and logging
+static void log_dns_error(const char* operation, const char* domain, dns_response_status_t status) {
+    const char* status_str;
+    switch (status) {
+        case DNS_STATUS_SUCCESS: status_str = "SUCCESS"; break;
+        case DNS_STATUS_FORMERR: status_str = "FORMAT_ERROR"; break;
+        case DNS_STATUS_SERVFAIL: status_str = "SERVER_FAILURE"; break;
+        case DNS_STATUS_NXDOMAIN: status_str = "DOMAIN_NOT_FOUND"; break;
+        case DNS_STATUS_NOTIMP: status_str = "NOT_IMPLEMENTED"; break;
+        case DNS_STATUS_REFUSED: status_str = "REFUSED"; break;
+        default: status_str = "UNKNOWN_ERROR"; break;
+    }
+    
+    dlog("DNS %s failed for domain '%s': %s (%d)", operation, domain ? domain : "NULL", status_str, status);
+}
+
+// Enhanced cache management with error recovery
+static int recover_dns_cache(dns_resolver_t* resolver) {
+    if (!resolver || !resolver->cache) return -1;
+    
+    dlog("Attempting DNS cache recovery");
+    
+    pthread_mutex_lock(&resolver->cache->lock);
+    
+    // Count valid entries
+    int valid_count = 0;
+    dns_cache_node_t* current = resolver->cache->head;
+    time_t now = time(NULL);
+    
+    while (current) {
+        if (current->entry.expires_at > now) {
+            valid_count++;
+        }
+        current = current->next;
+    }
+    
+    dlog("DNS cache recovery: %d valid entries out of %d total", valid_count, (int)resolver->cache->count);
+    
+    // If cache is severely corrupted, clear it
+    if (valid_count < (int)(resolver->cache->count / 2)) {
+        dlog("DNS cache severely corrupted, clearing all entries");
+        
+        current = resolver->cache->head;
+        while (current) {
+            dns_cache_node_t* next = current->next;
+            free(current->entry.fqdn);
+            free(current->entry.record.name);
+            free(current->entry.record.rdata);
+            free(current);
+            current = next;
+        }
+        
+        resolver->cache->head = NULL;
+        resolver->cache->count = 0;
+    }
+    
+    pthread_mutex_unlock(&resolver->cache->lock);
+    
+    dlog("DNS cache recovery completed");
+    return 0;
+}
+
+// Enhanced external DNS resolution with fallback
+static dns_response_status_t resolve_external_dns_with_fallback(const char* query_name, 
+                                                               dns_record_type_t query_type,
+                                                               dns_record_t** records,
+                                                               int* record_count) {
+    if (!query_name || !records || !record_count) {
+        return DNS_STATUS_SERVFAIL;
+    }
+    
+    // Primary external DNS servers to try
+    const char* dns_servers[] = {
+        "8.8.8.8",      // Google DNS
+        "1.1.1.1",      // Cloudflare DNS
+        "208.67.222.222" // OpenDNS
+    };
+    const int num_servers = sizeof(dns_servers) / sizeof(dns_servers[0]);
+    
+    for (int i = 0; i < num_servers; i++) {
+        external_dns_config_t config = {
+            .server = (char*)dns_servers[i],
+            .port = DEFAULT_EXTERNAL_DNS_PORT,
+            .timeout = DNS_QUERY_TIMEOUT
+        };
+        
+        dlog("Trying external DNS server %s for %s", dns_servers[i], query_name);
+        
+        dns_response_status_t status = resolve_external_dns(query_name, query_type, records, record_count, &config);
+        
+        if (status == DNS_STATUS_SUCCESS) {
+            dlog("External DNS resolution successful using server %s", dns_servers[i]);
+            return status;
+        }
+        
+        log_dns_error("external resolution", query_name, status);
+        
+        // Clean up any partial results
+        if (*records) {
+            for (int j = 0; j < *record_count; j++) {
+                free((*records)[j].name);
+                free((*records)[j].rdata);
+            }
+            free(*records);
+            *records = NULL;
+            *record_count = 0;
+        }
+    }
+    
+    dlog("All external DNS servers failed for %s", query_name);
+    return DNS_STATUS_SERVFAIL;
+}
 
 // Helper function to duplicate a DNS record
 static dns_record_t* duplicate_dns_record(const dns_record_t* src) {
@@ -225,7 +363,7 @@ int add_to_dns_cache(dns_resolver_t* resolver, const char* fqdn, const dns_recor
     pthread_mutex_lock(&resolver->cache->lock);
     
     // Check if the cache is full
-    if (resolver->cache->count >= resolver->config.cache_size_max) {
+    if (resolver->cache->count >= (size_t)resolver->config.cache_size_max) {
         // Remove the oldest entry (simple LRU implementation)
         // In a more sophisticated implementation, we would use a proper LRU algorithm
         
@@ -284,9 +422,9 @@ int add_to_dns_cache(dns_resolver_t* resolver, const char* fqdn, const dns_recor
     new_node->entry.expires_at = new_node->entry.fetched_at + record->ttl;
     
     // Adjust TTL if needed
-    if (record->ttl < resolver->config.cache_ttl_min) {
+    if ((int)record->ttl < resolver->config.cache_ttl_min) {
         new_node->entry.expires_at = new_node->entry.fetched_at + resolver->config.cache_ttl_min;
-    } else if (record->ttl > resolver->config.cache_ttl_max) {
+    } else if ((int)record->ttl > resolver->config.cache_ttl_max) {
         new_node->entry.expires_at = new_node->entry.fetched_at + resolver->config.cache_ttl_max;
     }
     
@@ -429,6 +567,58 @@ dns_response_status_t resolve_dns_query(dns_resolver_t* resolver,
         free_dns_record(cached_record);
     }
     
+    // Check if this is an external domain
+    if (is_external_domain(query_name, resolver->tld_manager)) {
+        // Handle external DNS resolution
+        if (resolver->config.enable_recursive_resolution) {
+            dlog("Resolving external domain: %s", query_name);
+            
+            // Use enhanced external DNS resolution with fallback
+            dns_response_status_t ext_status = resolve_external_dns_with_fallback(
+                query_name, query_type, records, record_count);
+            
+            if (ext_status != DNS_STATUS_SUCCESS) {
+                log_dns_error("external resolution with fallback", query_name, ext_status);
+                
+                // Attempt cache recovery if external resolution fails
+                if (ext_status == DNS_STATUS_SERVFAIL) {
+                    dlog("External DNS failed, attempting cache recovery");
+                    recover_dns_cache(resolver);
+                    
+                    // Try cache lookup again after recovery
+                    dns_record_t* recovered_record = NULL;
+                    int cache_recovery_result = lookup_in_dns_cache(resolver, query_name, query_type, &recovered_record);
+                    
+                    if (cache_recovery_result > 0 && recovered_record) {
+                        dlog("Found cached record after cache recovery for %s", query_name);
+                        *records = malloc(sizeof(dns_record_t));
+                        if (*records) {
+                            memcpy(*records, recovered_record, sizeof(dns_record_t));
+                            *record_count = 1;
+                            free(recovered_record);
+                            return DNS_STATUS_SUCCESS;
+                        }
+                        free_dns_record(recovered_record);
+                    }
+                }
+            } else {
+                // Cache successful external results
+                if (*records && *record_count > 0) {
+                    for (int i = 0; i < *record_count; i++) {
+                        add_to_dns_cache(resolver, query_name, &(*records)[i]);
+                    }
+                }
+            }
+            
+            return ext_status;
+        } else {
+            dlog("External domain %s requested but recursive resolution disabled", query_name);
+            log_dns_error("recursive resolution disabled", query_name, DNS_STATUS_REFUSED);
+            return DNS_STATUS_REFUSED;
+        }
+    }
+    
+    // Continue with local resolution for domains managed by local TLD manager
     // Parse the query name to extract TLD
     char hostname[MAX_DOMAIN_NAME_LEN];
     char domain[MAX_DOMAIN_NAME_LEN];
@@ -695,4 +885,294 @@ cleanup:
     pthread_rwlock_unlock(&resolver->tld_manager->lock);
     
     return status;
+}
+
+// Helper function to validate record data based on type
+static int validate_record_data(dns_record_type_t type, const char* rdata) {
+    if (!rdata) return 0;
+    
+    switch (type) {
+        case DNS_RECORD_TYPE_A: {
+            // Validate IPv4 address format
+            struct sockaddr_in sa;
+            return inet_pton(AF_INET, rdata, &(sa.sin_addr)) == 1;
+        }
+        case DNS_RECORD_TYPE_AAAA: {
+            // Validate IPv6 address format
+            struct sockaddr_in6 sa;
+            return inet_pton(AF_INET6, rdata, &(sa.sin6_addr)) == 1;
+        }
+        case DNS_RECORD_TYPE_MX: {
+            // MX record format: "priority hostname"
+            // Example: "10 mail.example.com"
+            int priority;
+            char hostname[MAX_DOMAIN_NAME_LEN];
+            return sscanf(rdata, "%d %255s", &priority, hostname) == 2;
+        }
+        case DNS_RECORD_TYPE_SRV: {
+            // SRV record format: "priority weight port target"
+            // Example: "10 20 80 web.example.com"
+            int priority, weight, port;
+            char target[MAX_DOMAIN_NAME_LEN];
+            return sscanf(rdata, "%d %d %d %255s", &priority, &weight, &port, target) == 4;
+        }
+        case DNS_RECORD_TYPE_TXT:
+        case DNS_RECORD_TYPE_CNAME:
+        case DNS_RECORD_TYPE_PTR:
+            // These can contain arbitrary text, just check they're not empty
+            return strlen(rdata) > 0;
+        default:
+            return 0;
+    }
+}
+
+// Helper function to format record data for display
+static const char* get_record_type_name(dns_record_type_t type) {
+    switch (type) {
+        case DNS_RECORD_TYPE_A: return "A";
+        case DNS_RECORD_TYPE_AAAA: return "AAAA";
+        case DNS_RECORD_TYPE_TXT: return "TXT";
+        case DNS_RECORD_TYPE_MX: return "MX";
+        case DNS_RECORD_TYPE_CNAME: return "CNAME";
+        case DNS_RECORD_TYPE_SRV: return "SRV";
+        case DNS_RECORD_TYPE_PTR: return "PTR";
+        default: return "UNKNOWN";
+    }
+}
+
+// Helper function to create a DNS record
+static dns_record_t* create_dns_record(const char* name, dns_record_type_t type, 
+                                      const char* rdata, uint32_t ttl) {
+    if (!name || !rdata) return NULL;
+    
+    // Validate the record data
+    if (!validate_record_data(type, rdata)) {
+        dlog("Invalid record data for %s record: %s", get_record_type_name(type), rdata);
+        return NULL;
+    }
+    
+    dns_record_t* record = malloc(sizeof(dns_record_t));
+    if (!record) return NULL;
+    
+    memset(record, 0, sizeof(dns_record_t));
+    
+    record->name = strdup(name);
+    if (!record->name) {
+        free(record);
+        return NULL;
+    }
+    
+    record->rdata = strdup(rdata);
+    if (!record->rdata) {
+        free(record->name);
+        free(record);
+        return NULL;
+    }
+    
+    record->type = type;
+    record->ttl = ttl;
+    record->last_updated = time(NULL);
+    
+    return record;
+}
+
+// Helper function to add a record to TLD (for testing/management)
+int add_record_to_tld(tld_manager_t* tld_manager, const char* tld_name, 
+                     const char* record_name, dns_record_type_t type, 
+                     const char* rdata, uint32_t ttl) {
+    if (!tld_manager || !tld_name || !record_name || !rdata) return -1;
+    
+    pthread_rwlock_wrlock(&tld_manager->lock);
+    
+    // Find the TLD
+    tld_t* found_tld = NULL;
+    for (size_t i = 0; i < tld_manager->tld_count; ++i) {
+        if (strcmp(tld_manager->tlds[i]->name, tld_name) == 0) {
+            found_tld = tld_manager->tlds[i];
+            break;
+        }
+    }
+    
+    if (!found_tld) {
+        pthread_rwlock_unlock(&tld_manager->lock);
+        dlog("TLD not found: %s", tld_name);
+        return -1;
+    }
+    
+    // Create the record
+    dns_record_t* new_record = create_dns_record(record_name, type, rdata, ttl);
+    if (!new_record) {
+        pthread_rwlock_unlock(&tld_manager->lock);
+        return -1;
+    }
+    
+    // Add to TLD records array
+    dns_record_t* temp = realloc(found_tld->records, 
+                                (found_tld->record_count + 1) * sizeof(dns_record_t));
+    if (!temp) {
+        free_dns_record(new_record);
+        pthread_rwlock_unlock(&tld_manager->lock);
+        return -1;
+    }
+    
+    found_tld->records = temp;
+    
+    // Copy the record data
+    memcpy(&found_tld->records[found_tld->record_count], new_record, sizeof(dns_record_t));
+    found_tld->record_count++;
+    found_tld->last_modified = time(NULL);
+    
+    // Free the temporary record structure (strings are now owned by TLD)
+    free(new_record);
+    
+    pthread_rwlock_unlock(&tld_manager->lock);
+    
+    dlog("Added %s record '%s' -> '%s' to TLD '%s'", 
+         get_record_type_name(type), record_name, rdata, tld_name);
+    
+    return 0;
+}
+
+// Check if a domain is external (not managed by local TLD manager)
+static int is_external_domain(const char* query_name, tld_manager_t* tld_manager) {
+    if (!query_name || !tld_manager) return 1; // Assume external if invalid input
+    
+    // Parse the query name to extract TLD
+    char hostname[MAX_DOMAIN_NAME_LEN];
+    char domain[MAX_DOMAIN_NAME_LEN];
+    char tld[MAX_DOMAIN_NAME_LEN];
+    
+    if (parse_fqdn(query_name, hostname, sizeof(hostname), domain, sizeof(domain), tld, sizeof(tld)) != 0) {
+        return 1; // Assume external if parsing fails
+    }
+    
+    // Check if the TLD is managed locally
+    pthread_rwlock_rdlock(&tld_manager->lock);
+    
+    for (size_t i = 0; i < tld_manager->tld_count; ++i) {
+        if (strcmp(tld_manager->tlds[i]->name, tld) == 0) {
+            pthread_rwlock_unlock(&tld_manager->lock);
+            return 0; // Local domain
+        }
+    }
+    
+    pthread_rwlock_unlock(&tld_manager->lock);
+    return 1; // External domain
+}
+
+// Resolve external DNS queries using system resolver
+static dns_response_status_t resolve_external_dns(const char* query_name, 
+                                                 dns_record_type_t query_type,
+                                                 dns_record_t** records,
+                                                 int* record_count,
+                                                 const external_dns_config_t* config) {
+    if (!query_name || !records || !record_count) {
+        return DNS_STATUS_SERVFAIL;
+    }
+    
+    *records = NULL;
+    *record_count = 0;
+    
+    // Use getaddrinfo for external DNS resolution
+    struct addrinfo hints, *result = NULL;
+    memset(&hints, 0, sizeof(hints));
+    
+    // Set up hints based on query type
+    switch (query_type) {
+        case DNS_RECORD_TYPE_A:
+            hints.ai_family = AF_INET;
+            break;
+        case DNS_RECORD_TYPE_AAAA:
+            hints.ai_family = AF_INET6;
+            break;
+        default:
+            // For other record types, we'll use a simplified approach
+            // In a full implementation, this would use raw DNS queries
+            dlog("External DNS resolution for record type %d not fully implemented", query_type);
+            return DNS_STATUS_NOTIMP;
+    }
+    
+    hints.ai_socktype = SOCK_STREAM;
+    
+    int status = getaddrinfo(query_name, NULL, &hints, &result);
+    if (status != 0) {
+        dlog("External DNS resolution failed for %s: %s", query_name, gai_strerror(status));
+        return DNS_STATUS_NXDOMAIN;
+    }
+    
+    // Count the number of results
+    int count = 0;
+    for (struct addrinfo* rp = result; rp != NULL; rp = rp->ai_next) {
+        count++;
+    }
+    
+    if (count == 0) {
+        freeaddrinfo(result);
+        return DNS_STATUS_NXDOMAIN;
+    }
+    
+    // Allocate records array
+    *records = malloc(count * sizeof(dns_record_t));
+    if (!*records) {
+        freeaddrinfo(result);
+        return DNS_STATUS_SERVFAIL;
+    }
+    
+    // Fill in the records
+    int record_index = 0;
+    for (struct addrinfo* rp = result; rp != NULL && record_index < count; rp = rp->ai_next) {
+        dns_record_t* record = &(*records)[record_index];
+        
+        record->name = strdup(query_name);
+        if (!record->name) {
+            // Cleanup on error
+            for (int i = 0; i < record_index; i++) {
+                free((*records)[i].name);
+                free((*records)[i].rdata);
+            }
+            free(*records);
+            *records = NULL;
+            freeaddrinfo(result);
+            return DNS_STATUS_SERVFAIL;
+        }
+        
+        record->type = query_type;
+        record->ttl = 300; // Default TTL for external records
+        record->last_updated = time(NULL);
+        
+        // Convert address to string
+        char addr_str[INET6_ADDRSTRLEN];
+        const char* addr_result = NULL;
+        
+        if (rp->ai_family == AF_INET) {
+            struct sockaddr_in* sin = (struct sockaddr_in*)rp->ai_addr;
+            addr_result = inet_ntop(AF_INET, &sin->sin_addr, addr_str, sizeof(addr_str));
+        } else if (rp->ai_family == AF_INET6) {
+            struct sockaddr_in6* sin6 = (struct sockaddr_in6*)rp->ai_addr;
+            addr_result = inet_ntop(AF_INET6, &sin6->sin6_addr, addr_str, sizeof(addr_str));
+        }
+        
+        if (addr_result) {
+            record->rdata = strdup(addr_str);
+            if (!record->rdata) {
+                // Cleanup on error
+                free(record->name);
+                for (int i = 0; i < record_index; i++) {
+                    free((*records)[i].name);
+                    free((*records)[i].rdata);
+                }
+                free(*records);
+                *records = NULL;
+                freeaddrinfo(result);
+                return DNS_STATUS_SERVFAIL;
+            }
+            record_index++;
+        }
+    }
+    
+    freeaddrinfo(result);
+    *record_count = record_index;
+    
+    dlog("External DNS resolution for %s returned %d records", query_name, record_index);
+    return record_index > 0 ? DNS_STATUS_SUCCESS : DNS_STATUS_NXDOMAIN;
 } 

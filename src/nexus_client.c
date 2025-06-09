@@ -141,7 +141,6 @@ static int init_client_crypto_context(nexus_client_config_t *config) {
     // Standard OpenSSL 3+ QUIC setup:
     SSL_CTX_set_min_proto_version(config->crypto_ctx->ssl_ctx, TLS1_3_VERSION);
     SSL_CTX_set_max_proto_version(config->crypto_ctx->ssl_ctx, TLS1_3_VERSION);
-    // ngtcp2_crypto_ossl_configure_client_session will handle SSL_CTX_set_quic_method for SSL*
 
     config->crypto_ctx->ssl = SSL_new(config->crypto_ctx->ssl_ctx);
     if (!config->crypto_ctx->ssl) {
@@ -149,25 +148,47 @@ static int init_client_crypto_context(nexus_client_config_t *config) {
         goto err_configure_ctx;
     }
     
-    // Configure SSL object for QUIC client session using ngtcp2 OSSL helper
-    if (ngtcp2_crypto_ossl_configure_client_session(config->crypto_ctx->ssl) != 0) {
-        dlog("ERROR: ngtcp2_crypto_ossl_configure_client_session failed: %s", ERR_error_string(ERR_get_error(), NULL));
-        goto err_ssl_new;
-    }
-
     // Set app data for OpenSSL QUIC callbacks to find ngtcp2_crypto_conn_ref
     SSL_set_app_data(config->crypto_ctx->ssl, &config->crypto_ctx->conn_ref); 
     SSL_set_connect_state(config->crypto_ctx->ssl);
 
-    const unsigned char alpn[] = "\x02h3"; // Example ALPN
-    if (SSL_set_alpn_protos(config->crypto_ctx->ssl, alpn, sizeof(alpn) -1) != 0) {
+    // Set correct ALPN for HTTP/3 over QUIC - this is critical for QUIC handshake
+    const unsigned char alpn[] = "\x02h3"; // Length-prefixed "h3" for HTTP/3
+    if (SSL_set_alpn_protos(config->crypto_ctx->ssl, alpn, sizeof(alpn) - 1) != 0) {
         dlog("ERROR: Failed to set ALPN: %s", ERR_error_string(ERR_get_error(), NULL));
-        // Non-fatal for now
+        goto err_configure_ctx;
     }
 
     if (config->bind_address && SSL_set_tlsext_host_name(config->crypto_ctx->ssl, config->bind_address) != 1) {
         dlog("Warning: Failed to set SNI: %s", ERR_error_string(ERR_get_error(), NULL));
         // Non-fatal
+    }
+    
+    // NOTE: We defer ngtcp2_crypto_ossl_configure_client_session and transport params
+    // until after the ngtcp2 connection is created, since the SSL context needs
+    // the connection reference to be properly set up
+    
+    return 0;
+
+err_configure_ctx:
+    SSL_CTX_free(config->crypto_ctx->ssl_ctx);
+err_ssl_ctx_new:
+    free(config->crypto_ctx);
+    config->crypto_ctx = NULL;
+    return -1;
+}
+
+// Complete the SSL configuration after ngtcp2 connection is created
+static int complete_client_crypto_setup(nexus_client_config_t *config) {
+    if (!config || !config->crypto_ctx || !config->crypto_ctx->ssl || !config->conn) {
+        dlog("ERROR: Invalid state for completing crypto setup");
+        return -1;
+    }
+    
+    // Configure SSL object for QUIC client session using ngtcp2 OSSL helper
+    if (ngtcp2_crypto_ossl_configure_client_session(config->crypto_ctx->ssl) != 0) {
+        dlog("ERROR: ngtcp2_crypto_ossl_configure_client_session failed: %s", ERR_error_string(ERR_get_error(), NULL));
+        return -1;
     }
     
     uint8_t paramsbuf[256];
@@ -185,31 +206,34 @@ static int init_client_crypto_context(nexus_client_config_t *config) {
     ssize_t nwrite = ngtcp2_transport_params_encode(paramsbuf, sizeof(paramsbuf), &params);
     if (nwrite < 0) {
         dlog("ERROR: Failed to encode transport parameters: %s", ngtcp2_strerror((int)nwrite));
-        goto err_ssl_new;
+        return -1;
     }
     
     // Use SSL_set_quic_tls_transport_params as indicated by ngtcp2's OpenSSL integration approach
     if (SSL_set_quic_tls_transport_params(config->crypto_ctx->ssl, paramsbuf, (size_t)nwrite) != 1) {
         dlog("ERROR: Failed to set QUIC TLS transport parameters on SSL object: %s", ERR_error_string(ERR_get_error(), NULL));
-        goto err_ssl_new;
+        return -1;
     }
     
     return 0;
-
-err_ssl_new:
-    SSL_free(config->crypto_ctx->ssl);
-err_configure_ctx:
-    SSL_CTX_free(config->crypto_ctx->ssl_ctx);
-err_ssl_ctx_new:
-    free(config->crypto_ctx);
-    config->crypto_ctx = NULL;
-    return -1;
 }
 
 static void cleanup_client_crypto_context(nexus_client_config_t *config) {
     if (!config || !config->crypto_ctx) return;
-    if (config->crypto_ctx->ssl) SSL_free(config->crypto_ctx->ssl);
-    if (config->crypto_ctx->ssl_ctx) SSL_CTX_free(config->crypto_ctx->ssl_ctx);
+    
+    // Safely free SSL object - check if it's valid first
+    if (config->crypto_ctx->ssl) {
+        // Clear any app data before freeing to avoid dangling pointers
+        SSL_set_app_data(config->crypto_ctx->ssl, NULL);
+        SSL_free(config->crypto_ctx->ssl);
+        config->crypto_ctx->ssl = NULL;
+    }
+    
+    if (config->crypto_ctx->ssl_ctx) {
+        SSL_CTX_free(config->crypto_ctx->ssl_ctx);
+        config->crypto_ctx->ssl_ctx = NULL;
+    }
+    
     free(config->crypto_ctx);
     config->crypto_ctx = NULL;
 }
@@ -341,35 +365,72 @@ int init_nexus_client(network_context_t *ctx, const char *server_addr, uint16_t 
         }
     };
     
-    // Create QUIC client connection
+    // Initialize TLS context for client BEFORE creating the ngtcp2 connection
+    if (init_client_crypto_context(config) != 0) {
+        dlog("ERROR: Failed to initialize client crypto context");
+        close(config->sock);
+        return -1;
+    }
+    
+    // Create QUIC client connection AFTER SSL context is ready
     int ret = ngtcp2_conn_client_new(&config->conn, &dcid, &scid, &path,
                                     NGTCP2_PROTO_VER_V1, &config->callbacks,
                                     &config->settings, &params, NULL, config);
     
     if (ret != 0) {
         dlog("ERROR: Failed to create QUIC client connection: %s", ngtcp2_strerror(ret));
+        cleanup_client_crypto_context(config);
         close(config->sock);
         return -1;
     }
-    
-    // Initialize TLS context for client
-    if (init_client_crypto_context(config) != 0) {
-        dlog("ERROR: Failed to initialize client crypto context");
-        ngtcp2_conn_del(config->conn);
-        close(config->sock);
-        return -1;
-    }
-    
+
     // Connect the SSL context to the ngtcp2 connection
     if (!config->crypto_ctx || !config->crypto_ctx->ssl) {
         dlog("ERROR: Invalid SSL context before setting TLS native handle");
+        cleanup_client_crypto_context(config);
         ngtcp2_conn_del(config->conn);
+        config->conn = NULL;
         close(config->sock);
+        config->sock = -1;
         return -1;
     }
     
     dlog("Setting TLS native handle with SSL context %p", config->crypto_ctx->ssl);
     ngtcp2_conn_set_tls_native_handle(config->conn, config->crypto_ctx->ssl);
+    
+    // Complete the SSL configuration now that the connection is created and linked
+    if (complete_client_crypto_setup(config) != 0) {
+        dlog("ERROR: Failed to complete client crypto setup");
+        cleanup_client_crypto_context(config);
+        ngtcp2_conn_del(config->conn);
+        config->conn = NULL;
+        close(config->sock);
+        config->sock = -1;
+        return -1;
+    }
+    
+    // Set initial peer address for QUIC (required for OpenSSL QUIC)
+    struct sockaddr_in6 peer_addr = {
+        .sin6_family = AF_INET6,
+        .sin6_port = htons(config->port)
+    };
+    
+    if (inet_pton(AF_INET6, config->bind_address, &peer_addr.sin6_addr) != 1) {
+        if (strcmp(config->bind_address, "localhost") == 0 || strcmp(config->bind_address, "127.0.0.1") == 0) {
+            inet_pton(AF_INET6, "::1", &peer_addr.sin6_addr);
+        } else {
+            dlog("ERROR: Invalid IPv6 address for peer: %s", config->bind_address);
+            cleanup_client_crypto_context(config);
+            ngtcp2_conn_del(config->conn);
+            config->conn = NULL;
+            close(config->sock);
+            config->sock = -1;
+            return -1;
+        }
+    }
+    
+    // Note: SSL_set1_initial_peer_addr is not available in our OpenSSL version
+    // This is handled by ngtcp2 internally through the path parameter
     
     // Initialize handshake state
     config->handshake_completed = 0;
